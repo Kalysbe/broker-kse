@@ -1,0 +1,112 @@
+openapi: 3.0.3
+info:
+  title: State Broker Information System API
+  version: "1.0.0"
+servers:
+  - url: /v1
+paths:
+  /auth/login:
+    post:
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [login, password]
+              properties:
+                login: { type: string }
+                password: { type: string }
+                totp: { type: string }
+      responses:
+        "200":
+          description: Token pair
+  /auth/refresh:
+    post:
+      summary: Rotate refresh token
+  /auth/logout:
+    post:
+      summary: Revoke session
+      security: [{ bearerAuth: [] }]
+  /auth/me:
+    get:
+      security: [{ bearerAuth: [] }]
+  /auth/change-password:
+    post:
+      summary: Change own password
+      security: [{ bearerAuth: [] }]
+  /dashboard:
+    get:
+      security: [{ bearerAuth: [] }]
+  /clients:
+    get:
+      security: [{ bearerAuth: [] }]
+    post:
+      security: [{ bearerAuth: [] }]
+  /clients/{id}:
+    get:
+      security: [{ bearerAuth: [] }]
+    patch:
+      security: [{ bearerAuth: [] }]
+    delete:
+      security: [{ bearerAuth: [] }]
+  /users:
+    get:
+      security: [{ bearerAuth: [] }]
+    post:
+      security: [{ bearerAuth: [] }]
+  /users/{id}:
+    get:
+      security: [{ bearerAuth: [] }]
+    patch:
+      security: [{ bearerAuth: [] }]
+    delete:
+      security: [{ bearerAuth: [] }]
+  /contracts:
+    get:
+      security: [{ bearerAuth: [] }]
+    post:
+      security: [{ bearerAuth: [] }]
+  /accounts:
+    get:
+      security: [{ bearerAuth: [] }]
+    post:
+      security: [{ bearerAuth: [] }]
+  /orders:
+    get:
+      security: [{ bearerAuth: [] }]
+    post:
+      summary: Submit order (idempotent on client_order_id)
+      security: [{ bearerAuth: [] }]
+  /trades:
+    get:
+      security: [{ bearerAuth: [] }]
+  /cash:
+    get:
+      description: Per-account cash via /accounts/{id}/cash
+  /reports:
+    get:
+      security: [{ bearerAuth: [] }]
+  /adapters:
+    get:
+      security: [{ bearerAuth: [] }]
+  /health:
+    get:
+      description: See root /health not under /v1
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: INSUFFICIENT_FUNDS }
+            message: { type: string }
+            request_id: { type: string }

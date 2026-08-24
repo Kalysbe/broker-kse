@@ -1,0 +1,21 @@
+{
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "HTTP request latency",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [{ "expr": "rate(http_request_duration_seconds_sum[5m])" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Orders and trades",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [{ "expr": "rate(sbis_orders_total[5m])" }]
+    }
+  ],
+  "schemaVersion": 39,
+  "title": "SBIS",
+  "uid": "sbis",
+  "version": 1
+}

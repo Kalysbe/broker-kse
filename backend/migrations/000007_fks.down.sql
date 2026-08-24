@@ -1,0 +1,2 @@
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS fk_orders_adapter;
+DROP TABLE IF EXISTS broker_accounts CASCADE;

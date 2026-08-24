@@ -1,0 +1,155 @@
+openapi: 3.0.3
+info:
+  title: Broker Gateway API
+  version: "1.0.0"
+  description: |
+    Этап 1. HTTPS REST для брокеров. WebSocket не используется.
+    Статусы и сделки читаются повторным опросом.
+    `broker_id` берётся из токена. Лишние поля JSON возвращают 400.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      security: []
+      summary: Шлюз жив
+      responses:
+        "200":
+          description: OK
+  /ready:
+    get:
+      security: []
+      summary: Готовность (БД + хотя бы один FIX-адаптер)
+      responses:
+        "200":
+          description: Ready
+        "503":
+          description: Not ready
+  /api/v1/firm:
+    get:
+      summary: Код фирмы текущего токена
+      responses:
+        "200":
+          description: Firm
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  quik_firm: { type: string, example: MC0031400000 }
+                  firm_name: { type: string, example: ТОО Example }
+  /api/v1/instruments:
+    get:
+      summary: Справочник инструментов
+      responses:
+        "200":
+          description: Instruments
+  /api/v1/accounts:
+    get:
+      summary: Счета брокера
+      responses:
+        "200":
+          description: Accounts
+  /api/v1/orders:
+    get:
+      summary: Список заявок (до 100)
+      responses:
+        "200":
+          description: Orders
+    post:
+      summary: Создать заявку
+      parameters:
+        - in: header
+          name: X-Request-ID
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrder"
+            example:
+              account_id: "1-3101-006"
+              client_code: "006"
+              client_order_id: "ORD-20260817-0001"
+              symbol: "KG0105166315"
+              board: "LISTEDSTOCKK"
+              side: BUY
+              order_type: LIMIT
+              time_in_force: DAY
+              quantity: "1"
+              price: "400"
+      responses:
+        "201":
+          description: Создана (idempotent=false)
+        "200":
+          description: Повтор (idempotent=true)
+        "400":
+          description: Валидация / неизвестное поле
+  /api/v1/orders/{id}:
+    get:
+      summary: Заявка + события + сделки
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Order detail
+        "404":
+          description: Не найдена или чужая
+  /api/v1/orders/{id}/cancel:
+    post:
+      summary: Снять заявку (ACKNOWLEDGED / PARTIALLY_FILLED)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Запрос на снятие принят
+        "400":
+          description: Нельзя снять из текущего статуса
+  /api/v1/trades:
+    get:
+      summary: Сделки (до 100)
+      responses:
+        "200":
+          description: Trades
+  /api/v1/positions:
+    get:
+      summary: Последний снимок позиций
+      responses:
+        "200":
+          description: Positions
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API-токен sk_test_… или sk_live_…
+  schemas:
+    CreateOrder:
+      type: object
+      additionalProperties: false
+      required: [account_id, client_code, client_order_id, symbol, board, side, order_type, quantity]
+      properties:
+        account_id: { type: string }
+        client_code: { type: string }
+        client_order_id: { type: string }
+        symbol: { type: string }
+        board: { type: string }
+        side: { type: string, enum: [BUY, SELL] }
+        order_type: { type: string, enum: [LIMIT, MARKET] }
+        time_in_force: { type: string, enum: [DAY, IOC, FOK, GTC] }
+        quantity: { oneOf: [{ type: string }, { type: number }] }
+        price: { oneOf: [{ type: string }, { type: number }] }
+    GatewayError:
+      type: object
+      properties:
+        error: { type: string }
+        details: { type: object }

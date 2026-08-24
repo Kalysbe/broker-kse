@@ -1,0 +1,21 @@
+---
+description: After backend or migration changes, restart the local API (and apply migrations) without asking the user.
+alwaysApply: true
+---
+
+# Restart local services when needed
+
+The project runs locally (not only Docker):
+
+- API: `go run ./cmd/api` in `backend`, port `18080`, env from `.env`
+- Frontend: Vite `npm run dev` in `frontend`, port `15173` (hot reload — do not restart unless it is down)
+- Postgres: `postgres://postgres:123@localhost:5432/sbis`
+
+When you change Go code, SQL migrations, `.env`, or the API would otherwise keep serving old binaries:
+
+1. Apply pending migrations to the local database (`migrate up` or equivalent SQL).
+2. Stop the process listening on `18080` (and its parent `go run` if present).
+3. Start the API again with `.env` loaded into the process environment.
+4. Wait until `GET http://localhost:18080/health` returns 200.
+
+Do this yourself. Do not tell the user to restart the API.
