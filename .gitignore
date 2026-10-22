@@ -1,6 +1,7 @@
 .env
 .env.production.local
 .deploy/
+backups/
 backend/certs/
 data/
 frontend/node_modules/
