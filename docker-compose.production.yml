@@ -2,8 +2,7 @@ name: broker-kse
 
 x-backend: &backend
   image: broker-kse-backend:${APP_VERSION:-latest}
-  build:
-    context: ./backend
+  pull_policy: never
   env_file: .env
   environment: &runtime
     APP_ENV: production
@@ -72,6 +71,8 @@ services:
 
   api:
     <<: *backend
+    build:
+      context: ./backend
     restart: unless-stopped
     depends_on:
       postgres:
