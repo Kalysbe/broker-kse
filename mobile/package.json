@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "export:web": "expo export --platform web",
     "preview": "node scripts/preview.mjs",
-    "test": "node --experimental-strip-types --test src/domain/order.test.ts src/domain/format.test.ts src/api/client.test.ts",
+    "test": "node --experimental-strip-types --test src/domain/order.test.ts src/domain/format.test.ts src/api/client.test.ts scripts/phone-config.test.mjs",
     "dev:backend": "node dev/start.mjs",
     "dev:seed": "node dev/setup.mjs",
     "test:integration": "node --experimental-strip-types --test dev/integration.test.ts",

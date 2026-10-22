@@ -3,7 +3,7 @@
     "name": "КФБ Инвест",
     "slug": "sbis-mobile",
     "scheme": "sbis",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "ios": {
@@ -11,7 +11,8 @@
       "bundleIdentifier": "kg.sbis.mobile"
     },
     "android": {
-      "package": "kg.sbis.mobile"
+      "package": "kg.sbis.mobile",
+      "versionCode": 2
     },
     "web": {
       "bundler": "metro",

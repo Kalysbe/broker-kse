@@ -17,4 +17,4 @@ if ($Device -notin $connected) { throw 'Указанный телефон не �
 if ($LASTEXITCODE -ne 0) { throw 'Не удалось установить APK.' }
 & $adb -s $Device shell am start -n kg.sbis.mobile.localphone/kg.sbis.mobile.MainActivity
 if ($LASTEXITCODE -ne 0) { throw 'Не удалось запустить приложение.' }
-Write-Host 'КФБ Инвест установлен. USB можно отключить. Подключите телефон к Wi-Fi той же локальной сети, что и ПК 192.168.20.96. API: http://192.168.20.96:18080; Metro не нужен.'
+Write-Host 'КФБ Инвест установлен. USB можно отключить. В стандартной сборке API: http://172.23.10.97; телефон должен иметь доступ к сети сервера. Metro не нужен.'

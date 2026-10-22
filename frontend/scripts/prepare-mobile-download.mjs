@@ -27,7 +27,16 @@ async function releaseVersion() {
     const version = config.expo?.version;
     return typeof version === "string" && version.trim() ? version.trim() : "0.1.0";
   } catch (error) {
-    if (error.code === "ENOENT") return "0.1.0";
+    if (error.code === "ENOENT") {
+      // The isolated Docker context retains the version prepared by the full checkout.
+      try {
+        const release = JSON.parse(await readFile(manifestPath, "utf8"));
+        if (typeof release.version === "string" && release.version.trim()) return release.version.trim();
+      } catch (manifestError) {
+        if (manifestError.code !== "ENOENT") throw manifestError;
+      }
+      return "0.1.0";
+    }
     throw error;
   }
 }

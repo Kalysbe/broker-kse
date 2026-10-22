@@ -3,6 +3,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
+import { phoneConfig } from './phone-config.mjs';
 
 const action = process.argv[2] || 'run';
 if (!['run', 'build', 'phone', 'start'].includes(action)) throw new Error('Use run, build, phone or start');
@@ -16,9 +17,10 @@ if (!existsSync(join(java, 'bin', 'java.exe')) || !existsSync(join(sdk, 'platfor
 const socketDir = join(process.env.USERPROFILE, '.android', 'sockets');
 mkdirSync(socketDir, { recursive: true });
 const env = { ...process.env, JAVA_HOME: java, ANDROID_HOME: sdk, JAVA_TOOL_OPTIONS: `${process.env.JAVA_TOOL_OPTIONS || ''} "-Djdk.net.unixdomain.tmpdir=${socketDir}"`, PATH: `${join(java, 'bin')};${join(sdk, 'platform-tools')};${process.env.PATH}`, EXPO_NO_TELEMETRY: '1' };
+const phone = action === 'phone' ? phoneConfig(process.env.EXPO_PUBLIC_API_URL) : undefined;
 if (action === 'phone') {
   env.EXPO_PUBLIC_DATA_SOURCE = 'kfb';
-  env.EXPO_PUBLIC_API_URL = 'http://192.168.20.96:18080';
+  env.EXPO_PUBLIC_API_URL = phone.apiURL;
   env.NODE_ENV = 'production';
 }
 function run(command, args, cwd = mirror) {
@@ -85,14 +87,17 @@ else {
   const rootScript = previousRootScript.split('\n').filter(line => line.trim() !== nativeSettings).join('\n');
   if (previousRootScript !== `${nativeSettings}\n${rootScript}`) writeFileSync(rootGradle, `${nativeSettings}\n${rootScript}`);
   if (action === 'build' || action === 'phone') {
-    if (action === 'phone') cpSync(join(source, 'dev', 'phone'), join(mirror, '.sbis-phone'), { recursive: true });
+    if (action === 'phone') {
+      cpSync(join(source, 'dev', 'phone'), join(mirror, '.sbis-phone'), { recursive: true });
+      writeFileSync(join(mirror, '.sbis-phone', 'res', 'xml', 'sbis_local_network.xml'), phone.networkSecurityXML);
+    }
     const task = action === 'phone' ? ':app:assembleLocalPhone -PsbisPhone=true -PreactNativeArchitectures=arm64-v8a' : ':app:assembleDebug -PreactNativeArchitectures=x86_64';
     run('cmd.exe', ['/d', '/s', '/c', `gradlew.bat ${task} --no-daemon --max-workers=2 --console=plain`], join(mirror, 'android'));
     const output = join(source, 'artifacts'); mkdirSync(output, { recursive: true });
     const variant = action === 'phone' ? 'localPhone' : 'debug';
     const fileName = action === 'phone' ? 'kfb-invest-android.apk' : 'sbis-mobile-debug.apk';
     copyFileSync(join(mirror, 'android', 'app', 'build', 'outputs', 'apk', variant, `app-${variant}.apk`), join(output, fileName));
-    console.log(`APK: ${join(output, fileName)} (${action === 'phone' ? 'ARM64 phone; bundled interface; Wi-Fi API http://192.168.20.96:18080' : 'x86_64 emulator, requires Metro'})`);
+    console.log(`APK: ${join(output, fileName)} (${action === 'phone' ? `ARM64 phone; bundled interface; API ${phone.apiURL}` : 'x86_64 emulator, requires Metro'})`);
   } else {
     // A debug app needs its source bundle at first launch, before Activity starts.
     await ensureMetro();
