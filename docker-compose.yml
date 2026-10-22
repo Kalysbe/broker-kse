@@ -65,6 +65,7 @@ services:
       - objects:/data/objects
       - ./backend/certs:/certs:ro
       - ./loadtest/reports:/reports
+      - ./mobile-updates:/data/mobile-updates:ro
     command: ["/app/api"]
 
   worker:

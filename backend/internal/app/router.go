@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"statebroker/sbis/internal/mobileupdates"
 	"statebroker/sbis/internal/platform/httpx"
 	"statebroker/sbis/internal/platform/telemetry"
 )
@@ -60,6 +61,9 @@ func (a *App) Router() http.Handler {
 	})
 
 	r.Route("/v1", func(r chi.Router) {
+		updates := mobileupdates.Handler{Dir: a.Cfg.MobileUpdatesDir}
+		r.Get("/mobile/updates", updates.Manifest)
+		r.Get("/mobile/assets/{key}", updates.Asset)
 		r.Get("/realtime/ws", a.handleWebSocket)
 		r.Post("/auth/login", a.handleLogin)
 		r.Post("/auth/refresh", a.handleRefresh)

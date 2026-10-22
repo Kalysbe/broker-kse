@@ -65,7 +65,8 @@ else {
     if (existsSync(target)) rmSync(target, { recursive: true });
     cpSync(join(source, name), target, { recursive: true });
   }
-  for (const name of ['package.json', 'package-lock.json', 'app.json', 'tsconfig.json', 'babel.config.js', 'metro.config.js']) if (existsSync(join(source, name))) copyFileSync(join(source, name), join(mirror, name));
+  for (const name of ['package.json', 'package-lock.json', 'app.json', 'app.config.js', 'tsconfig.json', 'babel.config.js', 'metro.config.js']) if (existsSync(join(source, name))) copyFileSync(join(source, name), join(mirror, name));
+  if (existsSync(join(source, 'certs'))) cpSync(join(source, 'certs'), join(mirror, 'certs'), { recursive: true });
   console.log(`Native build copy: ${mirror}\nEditable source and Metro: ${source}`);
   if (installNeeded) {
     const npm = process.env.npm_execpath || join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');

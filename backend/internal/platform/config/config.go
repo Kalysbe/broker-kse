@@ -17,6 +17,7 @@ type Config struct {
 	JWTSecret              string
 	HMACPepper             string
 	ObjectStoreDir         string
+	MobileUpdatesDir       string
 	AccessTTL              time.Duration
 	RefreshTTL             time.Duration
 	CORSOrigins            []string
@@ -46,6 +47,7 @@ func Load() Config {
 		JWTSecret:              mustEnv("JWT_SECRET"),
 		HMACPepper:             getenv("HMAC_PEPPER", "change-me-pepper"),
 		ObjectStoreDir:         getenv("OBJECT_STORE_DIR", "./data/objects"),
+		MobileUpdatesDir:       getenv("MOBILE_UPDATES_DIR", "./data/mobile-updates"),
 		AccessTTL:              time.Duration(accessMin) * time.Minute,
 		RefreshTTL:             time.Duration(refreshDays) * 24 * time.Hour,
 		CORSOrigins:            strings.Split(getenv("CORS_ORIGINS", "http://localhost:15173,http://localhost:18000"), ","),

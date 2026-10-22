@@ -6,14 +6,17 @@ import { Button, Card, DetailRow, Empty, MenuRow, Notice, Page } from '../compon
 import { useAccounts, useNotifications, usePreferences } from '../broker';
 import { useSession } from '../session';
 import { colors, ui } from '../theme';
+import { useAppUpdates } from '../updates/AppUpdates';
 import { AccountFeedback, AccountPicker, NoAccess, QueryFeedback, dateText, liveStyles as s } from './common';
 
 export function ProfileScreen() {
   const { user, logout } = useSession();
+  const updates = useAppUpdates();
   const [confirmExit, setConfirmExit] = useState(false), [pending, setPending] = useState(false);
   return <Page title="Профиль"><Card><View style={p.identity}><View style={p.avatar}><Text style={p.initials}>{user?.first_name.slice(0, 1)}{user?.last_name.slice(0, 1)}</Text></View><View style={s.flex}><Text style={p.name}>{[user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.login}</Text><Text style={ui.caption}>{user?.phone || user?.email || user?.login}</Text></View></View></Card>
     <Text style={p.groupTitle}>ДАННЫЕ И СЧЁТ</Text><Card style={s.listCard}><MenuRow icon={UserRound} title="Личные данные" detail="Контактная информация и счёт" onPress={() => router.push('/account')} /><MenuRow icon={FileText} title="Мои документы" onPress={() => router.push('/identification')} /><MenuRow icon={Building2} title="Банковский счёт" onPress={() => router.push('/transfer')} last /></Card>
     <Text style={p.groupTitle}>НАСТРОЙКИ</Text><Card style={s.listCard}><MenuRow icon={ShieldCheck} title="Безопасность" detail="Настройки доступа" onPress={() => router.push('/settings')} /><MenuRow icon={Bell} title="Уведомления" detail="Сообщения брокера" onPress={() => router.push('/notifications')} last /></Card>
+    <Card><DetailRow label="Версия приложения" value={updates.version} /><Button secondary disabled={updates.checking} onPress={() => { void updates.check(); }}>{updates.checking ? 'Проверяем обновления…' : 'Проверить обновления'}</Button>{!!updates.notice && <Text accessibilityLiveRegion="polite" style={ui.caption}>{updates.notice}</Text>}</Card>
     <Button secondary icon={LogOut} onPress={() => setConfirmExit(true)}>Выйти из аккаунта</Button>
     {confirmExit && <Card style={p.logout}><Text style={ui.label}>Выйти из аккаунта?</Text><Text style={ui.subtitle}>Для следующего входа понадобится пароль.</Text><Button disabled={pending} onPress={() => { setPending(true); void logout().finally(() => setPending(false)); }}>Выйти</Button><Button secondary disabled={pending} onPress={() => setConfirmExit(false)}>Остаться</Button></Card>}
   </Page>;

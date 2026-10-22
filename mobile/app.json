@@ -3,7 +3,15 @@
     "name": "КФБ Инвест",
     "slug": "sbis-mobile",
     "scheme": "sbis",
-    "version": "0.1.1",
+    "version": "0.1.2",
+    "runtimeVersion": "sbis-android-ota-1",
+    "updates": {
+      "url": "http://172.23.10.97/api/v1/mobile/updates",
+      "checkAutomatically": "ON_ERROR_RECOVERY",
+      "fallbackToCacheTimeout": 0,
+      "codeSigningCertificate": "./certs/certificate.pem",
+      "codeSigningMetadata": { "keyid": "main", "alg": "rsa-v1_5-sha256" }
+    },
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "ios": {
@@ -12,7 +20,7 @@
     },
     "android": {
       "package": "kg.sbis.mobile",
-      "versionCode": 2
+      "versionCode": 3
     },
     "web": {
       "bundler": "metro",

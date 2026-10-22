@@ -9,9 +9,10 @@ import { BrokerProvider } from '../src/broker';
 import { Button, Card, Page } from '../src/components';
 import { errorMessage } from '../src/api/client';
 import { colors } from '../src/theme';
+import { AppUpdatesProvider } from '../src/updates/AppUpdates';
 
 export default function RootLayout() {
-  return <SafeAreaProvider><QueryClientProvider client={queryClient}><SessionProvider><BrokerProvider><ApplicationFrame /></BrokerProvider></SessionProvider></QueryClientProvider></SafeAreaProvider>;
+  return <SafeAreaProvider><QueryClientProvider client={queryClient}><SessionProvider><AppUpdatesProvider><BrokerProvider><ApplicationFrame /></BrokerProvider></AppUpdatesProvider></SessionProvider></QueryClientProvider></SafeAreaProvider>;
 }
 function ApplicationFrame() {
   const { user } = useSession();
