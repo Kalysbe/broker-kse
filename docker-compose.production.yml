@@ -85,7 +85,6 @@ services:
       - 127.0.0.1:19090:9090
     volumes:
       - objects:/data/objects
-      - ./backend/certs:/certs:ro
       - ./loadtest/reports:/reports
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/health/ready]
@@ -103,8 +102,6 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-    volumes:
-      - ./backend/certs:/certs:ro
     command: [/app/worker]
 
   frontend:

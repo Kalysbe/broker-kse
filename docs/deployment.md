@@ -17,8 +17,8 @@ chmod 600 .env
 # Set APP_ENV=production, CORS_ORIGINS to the server URL, unique JWT_SECRET,
 # HMAC_PEPPER, GATEWAY_DEV_TOKEN, SEED_ADMIN_PASSWORD, and POSTGRES_PASSWORD.
 # POSTGRES_PASSWORD must be URL-safe (for example, a generated hex value).
-# Keep exchange credentials in .env and certificates in backend/certs/.
-mkdir -p backend/certs loadtest/reports
+# Configure the exchange token through Integrations -> KFB after signing in.
+mkdir -p loadtest/reports
 sudo chown 65534:65534 loadtest/reports
 docker compose -f docker-compose.production.yml config --quiet
 docker compose -f docker-compose.production.yml build
@@ -29,6 +29,8 @@ curl --fail http://127.0.0.1/health/ready
 Migrations and administrator seeding complete before the API starts. Seeding
 updates the administrator password from `.env` on subsequent deployments. Keep
 the JWT secret stable because saved exchange settings are encrypted with it.
+The exchange token is entered and saved through the administrator interface;
+client certificates and private keys are not required for deployment.
 
 For an update, back up the database, fetch the intended commit, rebuild, then run
 `up -d`. To roll back application code, check out the previous commit and repeat
