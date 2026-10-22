@@ -1,9 +1,9 @@
 {
   "available": true,
   "url": "/downloads/kfb-invest-android.apk",
-  "version": "0.1.1",
-  "bytes": 22821234,
-  "sha256": "9d2724e45c281a037b290828307c443663270491cfcc2e956dc78272a42e2e28",
+  "version": "0.1.2",
+  "bytes": 26425361,
+  "sha256": "436dfdd5e96da8a6f66e5e31ab1bb689ec7907b14d67282833cdc36bfc8969e5",
   "channel": "test",
   "requirements": "Android 7+ · ARM64"
 }
