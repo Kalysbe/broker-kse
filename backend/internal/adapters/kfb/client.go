@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,12 +21,17 @@ import (
 )
 
 type Client struct {
-	base   string
-	token  string
-	http   *http.Client
-	mu     sync.Mutex
-	health adapters.Health
-	last   Snapshot
+	connection        atomic.Pointer[ConnectionSettings]
+	connectionVersion atomic.Uint64
+	gate              *requestGate
+	readGate          *requestGate
+	healthMu          sync.Mutex
+	base              string
+	token             string
+	http              *http.Client
+	mu                sync.Mutex
+	health            adapters.Health
+	last              Snapshot
 }
 
 type Snapshot struct {
@@ -49,6 +56,29 @@ type PositionsResult struct {
 	Note      string
 }
 
+type RemoteOrder struct {
+	UpdatedAt        time.Time `json:"updated_at,omitempty"`
+	QuikOrderID      string    `json:"quik_order_id"`
+	FIXClientOrderID string    `json:"fix_cl_ord_id"`
+	ID               string    `json:"id"`
+	Status           string    `json:"status"`
+	FilledQuantity   string    `json:"filled_quantity"`
+	AveragePrice     string    `json:"avg_price"`
+	RejectReason     string    `json:"reject_reason"`
+}
+
+type OrderBookResult struct {
+	Bids      []map[string]any
+	Asks      []map[string]any
+	Symbol    string
+	Board     string
+	Currency  string
+	Last      string
+	UpdatedAt any
+	Live      bool
+	Source    string
+}
+
 func New(baseURL, token string) *Client {
 	tok := strings.TrimSpace(token)
 	return &Client{
@@ -56,9 +86,11 @@ func New(baseURL, token string) *Client {
 		token: tok,
 		http: &http.Client{
 			Timeout:   12 * time.Second,
-			Transport: bearerTransport{token: tok},
+			Transport: http.DefaultTransport,
 		},
-		health: adapters.Offline,
+		health:   adapters.Offline,
+		gate:     &requestGate{interval: 51 * time.Millisecond},
+		readGate: &requestGate{interval: 11 * time.Millisecond},
 	}
 }
 
@@ -84,7 +116,7 @@ func (t bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func (c *Client) Configured() bool {
-	return c != nil && c.base != "" && c.token != ""
+	return c != nil && c.baseURL() != "" && c.gatewayToken() != ""
 }
 
 func (c *Client) Code() string { return "KFB" }
@@ -92,17 +124,35 @@ func (c *Client) Kind() string { return "EXCHANGE" }
 func (c *Client) Weight() int  { return 20 }
 
 func (c *Client) HealthCheck(ctx context.Context) adapters.Health {
+	c.healthMu.Lock()
+	defer c.healthMu.Unlock()
+	snapshot := c.Snapshot()
+	if snapshot.LastCheckAt != nil && time.Since(*snapshot.LastCheckAt) < 15*time.Second {
+		var detail RequestError
+		if json.Unmarshal([]byte(snapshot.Error), &detail) == nil && (detail.HTTPStatus == 429 || detail.Stage == "rate_limit_wait") {
+			return adapters.Degraded
+		}
+		return adapters.Health(snapshot.Health)
+	}
 	if !c.Configured() {
 		c.setHealth(adapters.Offline, "KFB gateway URL or token is not configured")
 		return adapters.Offline
 	}
 	_, err := c.get(ctx, "/health")
 	if err != nil {
+		if isThrottled(err) {
+			c.setHealth(adapters.Degraded, err.Error())
+			return adapters.Degraded
+		}
 		c.setHealth(adapters.Offline, err.Error())
 		return adapters.Offline
 	}
 	_, err = c.get(ctx, "/api/v1/firm")
 	if err != nil {
+		if isThrottled(err) {
+			c.setHealth(adapters.Degraded, err.Error())
+			return adapters.Degraded
+		}
 		c.setHealth(adapters.Offline, err.Error())
 		return adapters.Offline
 	}
@@ -114,7 +164,7 @@ func (c *Client) Refresh(ctx context.Context) Snapshot {
 	if !c.Configured() {
 		snap := Snapshot{
 			Connected:   false,
-			BaseURL:     c.base,
+			BaseURL:     c.baseURL(),
 			TokenPrefix: "",
 			Health:      string(adapters.Offline),
 			Error:       "KFB gateway URL or token is not configured",
@@ -131,8 +181,8 @@ func (c *Client) Refresh(ctx context.Context) Snapshot {
 	}
 	now := time.Now().UTC()
 	snap := Snapshot{
-		BaseURL:     c.base,
-		TokenPrefix: gateway.TokenPrefix(c.token),
+		BaseURL:     c.baseURL(),
+		TokenPrefix: gateway.TokenPrefix(c.gatewayToken()),
 		Instruments: []map[string]any{},
 		Accounts:    []map[string]any{},
 		Positions:   []map[string]any{},
@@ -209,6 +259,111 @@ func (c *Client) FetchPositions(ctx context.Context) (PositionsResult, error) {
 	return pos, nil
 }
 
+func (c *Client) FetchOrder(ctx context.Context, venueOrderID string) (RemoteOrder, error) {
+	if !c.Configured() || strings.TrimSpace(venueOrderID) == "" {
+		return RemoteOrder{}, fmt.Errorf("kfb order lookup is not configured")
+	}
+	if err := validateGatewayOrderID(venueOrderID); err != nil {
+		return RemoteOrder{}, err
+	}
+	raw, err := c.get(ctx, "/api/v1/orders/"+url.PathEscape(venueOrderID))
+	if err != nil {
+		return RemoteOrder{}, err
+	}
+	var wrap struct {
+		Order RemoteOrder `json:"order"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return RemoteOrder{}, err
+	}
+	if wrap.Order.ID == "" {
+		return RemoteOrder{}, fmt.Errorf("kfb order response is empty")
+	}
+	return wrap.Order, nil
+}
+
+func (c *Client) FetchOrderDetails(ctx context.Context, venueOrderID string) (json.RawMessage, error) {
+	if !c.Configured() || strings.TrimSpace(venueOrderID) == "" {
+		return nil, fmt.Errorf("kfb order lookup is not configured")
+	}
+	if err := validateGatewayOrderID(venueOrderID); err != nil {
+		return nil, err
+	}
+	raw, err := c.get(ctx, "/api/v1/orders/"+url.PathEscape(venueOrderID))
+	if err != nil {
+		return nil, err
+	}
+	if !json.Valid(raw) {
+		return nil, fmt.Errorf("invalid gateway order JSON")
+	}
+	return json.RawMessage(raw), nil
+}
+
+func (c *Client) FetchOrderBook(ctx context.Context, symbol, board string) (OrderBookResult, error) {
+	if !c.Configured() {
+		return OrderBookResult{}, fmt.Errorf("kfb order book is not configured")
+	}
+	path := "/api/v1/orderbook?symbol=" + url.QueryEscape(strings.TrimSpace(symbol)) + "&board=" + url.QueryEscape(strings.TrimSpace(board))
+	raw, err := c.get(ctx, path)
+	if err != nil {
+		return OrderBookResult{}, err
+	}
+	var response struct {
+		Books []struct {
+			Symbol    string `json:"symbol"`
+			Board     string `json:"board"`
+			Currency  string `json:"currency"`
+			Last      string `json:"last"`
+			UpdatedAt any    `json:"updated_at"`
+			Bids      []struct {
+				Price string `json:"price"`
+				Size  string `json:"size"`
+			} `json:"bids"`
+			Offers []struct {
+				Price string `json:"price"`
+				Size  string `json:"size"`
+			} `json:"offers"`
+		} `json:"books"`
+		Live   bool   `json:"live"`
+		Source string `json:"source"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return OrderBookResult{}, err
+	}
+	if len(response.Books) == 0 {
+		return OrderBookResult{Bids: []map[string]any{}, Asks: []map[string]any{}, Live: response.Live, Source: response.Source}, nil
+	}
+	book := response.Books[0]
+	result := OrderBookResult{Bids: []map[string]any{}, Asks: []map[string]any{}, Symbol: book.Symbol, Board: book.Board, Currency: book.Currency, Last: book.Last, UpdatedAt: book.UpdatedAt, Live: response.Live, Source: response.Source}
+	for _, level := range book.Bids {
+		result.Bids = append(result.Bids, map[string]any{"price": level.Price, "quantity": level.Size})
+	}
+	for _, level := range book.Offers {
+		result.Asks = append(result.Asks, map[string]any{"price": level.Price, "quantity": level.Size})
+	}
+	return result, nil
+}
+
+func (c *Client) FetchTrades(ctx context.Context) ([]map[string]any, error) {
+	if !c.Configured() {
+		return nil, fmt.Errorf("kfb trades are not configured")
+	}
+	raw, err := c.get(ctx, "/api/v1/trades")
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Trades []map[string]any `json:"trades"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, err
+	}
+	if response.Trades == nil {
+		response.Trades = []map[string]any{}
+	}
+	return response.Trades, nil
+}
+
 func (c *Client) Snapshot() Snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -225,19 +380,16 @@ func (c *Client) Snapshot() Snapshot {
 	if s.Firm == nil {
 		s.Firm = map[string]any{}
 	}
-	if s.TokenPrefix == "" && c.token != "" {
-		s.TokenPrefix = gateway.TokenPrefix(c.token)
+	if s.TokenPrefix == "" && c.gatewayToken() != "" {
+		s.TokenPrefix = gateway.TokenPrefix(c.gatewayToken())
 	}
 	if s.BaseURL == "" {
-		s.BaseURL = c.base
+		s.BaseURL = c.baseURL()
 	}
 	return s
 }
 
 func (c *Client) SendOrder(ctx context.Context, o adapters.VenueOrder) (adapters.VenueAck, error) {
-	if c.HealthCheck(ctx) == adapters.Offline {
-		return adapters.VenueAck{}, httpx.ErrAdapterUnavailable
-	}
 	tif := o.TIF
 	if tif == "" {
 		tif = "DAY"
@@ -261,7 +413,7 @@ func (c *Client) SendOrder(ctx context.Context, o adapters.VenueOrder) (adapters
 		return adapters.VenueAck{}, err
 	}
 	if status != http.StatusCreated && status != http.StatusOK {
-		return adapters.VenueAck{}, fmt.Errorf("kfb create order: %s", gatewayError(raw, status))
+		return adapters.VenueAck{}, fmt.Errorf("kfb create order: HTTP %d: %s", status, string(raw))
 	}
 	var resp struct {
 		Order struct {
@@ -270,14 +422,27 @@ func (c *Client) SendOrder(ctx context.Context, o adapters.VenueOrder) (adapters
 		} `json:"order"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return adapters.VenueAck{}, err
+		return adapters.VenueAck{}, &RequestError{Code: "ADAPTER_ERROR", Source: "GATEWAY", Stage: "decode_response", Message: err.Error(), Method: http.MethodPost, Path: "/api/v1/orders", Request: body, HTTPStatus: status, Response: string(raw), At: time.Now().UTC()}
+	}
+	if resp.Order.ID == "" {
+		return adapters.VenueAck{}, &RequestError{Code: "ADAPTER_ERROR", Source: "GATEWAY", Stage: "decode_response", Message: "gateway returned an empty order id", Method: http.MethodPost, Path: "/api/v1/orders", Request: body, HTTPStatus: status, Response: string(raw), At: time.Now().UTC()}
 	}
 	return adapters.VenueAck{VenueOrderID: resp.Order.ID, Status: resp.Order.Status}, nil
+}
+
+func validateGatewayOrderID(orderID string) error {
+	if strings.HasPrefix(orderID, "VENUE-") {
+		return fmt.Errorf("mock order id cannot be sent to KFB gateway")
+	}
+	return nil
 }
 
 func (c *Client) CancelOrder(ctx context.Context, venueOrderID, clientOrderID string, orderQty decimal.Decimal) error {
 	if venueOrderID == "" {
 		return fmt.Errorf("missing KFB order id")
+	}
+	if err := validateGatewayOrderID(venueOrderID); err != nil {
+		return err
 	}
 	qty := orderQty.String()
 	body := map[string]any{
@@ -326,35 +491,57 @@ func (c *Client) get(ctx context.Context, path string) ([]byte, error) {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, payload any) ([]byte, int, error) {
-	if c == nil || strings.TrimSpace(c.token) == "" {
-		return nil, 0, fmt.Errorf("kfb token is not configured")
+	started := time.Now().UTC()
+	diagnostic := &RequestError{Code: "ADAPTER_ERROR", Source: "OUR_SYSTEM", Stage: "prepare", Method: method, Path: path, Request: payload, At: started, RequestID: uuid.NewString()}
+	failure := func(stage, source string, status int, raw []byte, err error) ([]byte, int, error) {
+		diagnostic.Stage, diagnostic.Source, diagnostic.HTTPStatus = stage, source, status
+		diagnostic.Response, diagnostic.Message = string(raw), err.Error()
+		diagnostic.ElapsedMS = time.Since(started).Milliseconds()
+		return raw, status, diagnostic
 	}
+	if c == nil || strings.TrimSpace(c.gatewayToken()) == "" {
+		return failure("configuration", "OUR_SYSTEM", 0, nil, fmt.Errorf("kfb token is not configured"))
+	}
+	settings := c.ConnectionSettings()
 	var rdr io.Reader
 	if payload != nil {
 		b, err := json.Marshal(payload)
 		if err != nil {
-			return nil, 0, err
+			return failure("serialize", "OUR_SYSTEM", 0, nil, err)
 		}
 		rdr = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rdr)
+	req, err := http.NewRequestWithContext(ctx, method, settings.RESTURL+path, rdr)
 	if err != nil {
-		return nil, 0, err
+		return failure("prepare", "OUR_SYSTEM", 0, nil, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+settings.APIToken)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("X-Request-ID", uuid.NewString())
+	req.Header.Set("X-Request-ID", diagnostic.RequestID)
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	gate := c.gateFor(method)
+	if err := gate.wait(ctx); err != nil {
+		return failure("rate_limit_wait", "OUR_SYSTEM", 0, nil, err)
+	}
 	res, err := c.http.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return failure("transport", "UNKNOWN", 0, nil, err)
 	}
 	defer res.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	raw, err := io.ReadAll(res.Body)
 	if err != nil {
-		return nil, res.StatusCode, err
+		return failure("read_response", "UNKNOWN", res.StatusCode, raw, err)
+	}
+	if res.StatusCode >= 300 {
+		if res.StatusCode == http.StatusTooManyRequests {
+			diagnostic.Code = "RATE_LIMITED"
+			if pauseErr := gate.pause(ctx, retryDelay(res.Header.Get("Retry-After"))); pauseErr != nil {
+				return failure("rate_limit_pause", "OUR_SYSTEM", res.StatusCode, raw, pauseErr)
+			}
+		}
+		return failure("gateway_response", "GATEWAY", res.StatusCode, raw, fmt.Errorf("HTTP %d: %s", res.StatusCode, string(raw)))
 	}
 	return raw, res.StatusCode, nil
 }
@@ -366,9 +553,9 @@ func (c *Client) setHealth(h adapters.Health, errText string) {
 	c.last.Health = string(h)
 	c.last.Connected = h == adapters.Online
 	c.last.Error = errText
-	c.last.BaseURL = c.base
-	if c.token != "" {
-		c.last.TokenPrefix = gateway.TokenPrefix(c.token)
+	c.last.BaseURL = c.baseURL()
+	if c.gatewayToken() != "" {
+		c.last.TokenPrefix = gateway.TokenPrefix(c.gatewayToken())
 	}
 	now := time.Now().UTC()
 	c.last.LastCheckAt = &now
@@ -380,6 +567,9 @@ func (c *Client) store(snap Snapshot, h adapters.Health) {
 	c.health = h
 	c.last = snap
 }
+
+// ParsePositions normalizes a full REST or gRPC positions snapshot.
+func ParsePositions(raw []byte) PositionsResult { return parsePositions(raw) }
 
 func parsePositions(raw []byte) PositionsResult {
 	out := PositionsResult{Positions: []map[string]any{}}

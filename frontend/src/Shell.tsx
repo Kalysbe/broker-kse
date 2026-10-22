@@ -2,6 +2,8 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "./auth";
 import { ExchangeFooter } from "./ExchangeFooter";
+import { useSocketCache } from "./useSocketCache";
+import { DataSources } from "./components/DataSources";
 
 const groups: { label: string; items: { to: string; key: string; perm?: string; icon: string }[] }[] = [
   { label: "dashboard", items: [{ to: "/", key: "dashboard", icon: "grid" }] },
@@ -73,6 +75,7 @@ const groups: { label: string; items: { to: string; key: string; perm?: string; 
       { to: "/audit", key: "audit", perm: "audit.read", icon: "eye" },
       { to: "/notifications", key: "notifications", perm: "notifications.manage", icon: "bell" },
       { to: "/health", key: "health", perm: "adapters.read", icon: "heart" },
+      { to: "/load-testing", key: "loadTesting", perm: "adapters.operate", icon: "pulse" },
     ],
   },
 ];
@@ -85,6 +88,7 @@ function initials(first?: string, last?: string, login?: string) {
 }
 
 export function Shell() {
+  useSocketCache();
   const { t, i18n } = useTranslation();
   const { user, can, logout } = useAuth();
   const loc = useLocation();
@@ -92,27 +96,29 @@ export function Shell() {
 
   return (
     <>
-      <div className="min-h-screen grid grid-cols-[272px_1fr] bg-paper pb-8">
-        <aside className="bg-navy text-white/80 overflow-y-auto relative">
-          <div className="absolute inset-0 pointer-events-none opacity-40 bg-[radial-gradient(500px_240px_at_0%_0%,rgba(58,168,181,0.35),transparent_70%)]" />
-          <div className="relative px-5 py-5 border-b border-white/10">
+      <div className="grid h-[calc(100vh-2rem)] grid-cols-[248px_1fr] overflow-hidden bg-[#f6f8fc]">
+        <aside className="relative flex min-h-0 flex-col overflow-hidden border-r border-slate-200 bg-white text-slate-600">
+          <div className="relative px-5 py-5 border-b border-slate-100">
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-brand-light to-brand-dark grid place-items-center font-bold text-navy shadow-glow">
+              <div className="h-10 w-10 rounded-xl bg-blue-600 grid place-items-center font-bold text-white shadow-[0_8px_20px_rgba(37,99,235,.25)]">
                 S
               </div>
               <div>
-                <div className="text-white font-semibold tracking-[0.18em] text-sm">{t("app.short")}</div>
-                <div className="text-[11px] text-white/50 mt-0.5 leading-tight">{t("app.name")}</div>
+                <div className="text-slate-950 font-bold tracking-[0.14em] text-sm">{t("app.short")}</div>
+                <div className="text-[11px] text-slate-400 mt-0.5 leading-tight">{t("app.name")}</div>
               </div>
             </div>
           </div>
-          <nav className="relative py-4 pb-28">
+          <nav
+            className="relative min-h-0 flex-1 overflow-y-auto py-4 sidebar-scroll"
+            onWheel={(event) => event.stopPropagation()}
+          >
             {groups.map((g) => {
               const items = g.items.filter((it) => !user || !it.perm || can(it.perm));
               if (items.length === 0) return null;
               return (
                 <div key={g.label} className="mb-4">
-                  <div className="px-5 text-[10px] uppercase tracking-[0.16em] text-white/35 mb-1.5">
+                  <div className="px-5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400 mb-1.5">
                     {t(`nav.${g.label}`)}
                   </div>
                   {items.map((it) => (
@@ -121,10 +127,10 @@ export function Shell() {
                       to={it.to}
                       end={it.to === "/"}
                       className={({ isActive }) =>
-                        `mx-2 flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors ${
+                        `mx-2 flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium transition-all ${
                           isActive
-                            ? "bg-white/10 text-white shadow-[inset_3px_0_0_0_#3AA8B5]"
-                            : "text-white/65 hover:bg-white/5 hover:text-white"
+                            ? "bg-blue-50 text-blue-700 shadow-[inset_3px_0_0_0_#2563eb]"
+                            : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
                         }`
                       }
                     >
@@ -139,41 +145,45 @@ export function Shell() {
           {user && (
             <NavLink
               to="/profile"
-              className={`absolute bottom-0 inset-x-0 m-3 rounded-2xl p-3 flex items-center gap-3 transition-colors ${
-                onProfile ? "bg-white/15 text-white" : "bg-white/[0.08] hover:bg-white/10 text-white/90"
+              className={`relative m-3 mt-0 shrink-0 rounded-2xl border p-3 flex items-center gap-3 transition-colors ${
+                onProfile ? "border-blue-200 bg-blue-50 text-blue-800" : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
               }`}
             >
-              <div className="h-9 w-9 rounded-xl bg-brand grid place-items-center text-navy font-semibold text-sm shrink-0">
+              <div className="h-9 w-9 rounded-xl bg-blue-600 grid place-items-center text-white font-semibold text-sm shrink-0">
                 {initials(user.first_name, user.last_name, user.login)}
               </div>
               <div className="min-w-0">
-                <div className="text-sm text-white truncate">
+                <div className="text-sm font-medium truncate">
                   {user.first_name} {user.last_name}
                 </div>
-                <div className="text-[11px] text-white/50 truncate">{t("nav.profile")}</div>
+                <div className="text-[11px] text-slate-400 truncate">{t("nav.profile")}</div>
               </div>
             </NavLink>
           )}
         </aside>
-        <div className="flex flex-col min-w-0">
-          <header className="h-16 bg-white/80 backdrop-blur border-b border-line flex items-center justify-between px-6 sticky top-0 z-20">
+        <div className="flex min-h-0 min-w-0 flex-col overflow-y-auto app-scroll">
+          <header className="h-[72px] bg-white/90 backdrop-blur border-b border-slate-200 flex items-center justify-between gap-6 px-6 sticky top-0 z-20">
             <div className="min-w-0">
-              <div className="text-[11px] uppercase tracking-[0.14em] text-muted">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-600">
                 {user?.broker?.name || t("app.name")}
               </div>
-              <div className="text-sm text-ink truncate">
+              <div className="text-sm font-medium text-slate-800 truncate">
                 {user ? `${user.first_name} ${user.last_name}` : ""}
-                {user?.roles?.[0] ? <span className="text-muted"> · {user.roles[0]}</span> : null}
+                {user?.roles?.[0] ? <span className="text-slate-400"> · {user.roles[0]}</span> : null}
               </div>
             </div>
+            <label className="relative hidden max-w-md flex-1 lg:block">
+              <span className="absolute left-3 top-2.5 text-slate-400">⌕</span>
+              <input className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100" placeholder="Быстрый поиск по системе…" />
+            </label>
             <div className="flex gap-2 items-center">
-              <div className="flex rounded-xl border border-line overflow-hidden text-xs">
+              <div className="flex rounded-xl border border-slate-200 overflow-hidden text-xs">
                 {(["ky", "ru", "en"] as const).map((lang) => (
                   <button
                     key={lang}
                     type="button"
                     className={`px-2.5 py-1.5 uppercase ${
-                      i18n.language.startsWith(lang) ? "bg-navy text-white" : "bg-white text-muted hover:bg-paper"
+                      i18n.language.startsWith(lang) ? "bg-slate-900 text-white" : "bg-white text-slate-400 hover:bg-slate-50"
                     }`}
                     onClick={() => {
                       void i18n.changeLanguage(lang);
@@ -186,7 +196,7 @@ export function Shell() {
               </div>
               <NavLink
                 to="/profile"
-                className="h-9 w-9 rounded-xl bg-gradient-to-br from-brand to-navy-soft text-white grid place-items-center text-xs font-semibold"
+                className="h-9 w-9 rounded-xl bg-blue-600 text-white grid place-items-center text-xs font-semibold shadow-[0_5px_15px_rgba(37,99,235,.2)]"
                 title={t("nav.profile")}
               >
                 {user ? initials(user.first_name, user.last_name, user.login) : "?"}
@@ -196,8 +206,8 @@ export function Shell() {
               </button>
             </div>
           </header>
-          <main className="p-6">
-            <Outlet />
+          <main className="p-6 lg:p-8 max-w-[1800px] w-full mx-auto">
+            <DataSources /><Outlet />
           </main>
         </div>
       </div>

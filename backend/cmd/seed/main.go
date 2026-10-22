@@ -153,9 +153,9 @@ func seedGatewayDemo(ctx context.Context, pool *pgxpool.Pool, token string) erro
 		SELECT '88888888-8888-8888-8888-888888888888', b.id, 'stage1-dev', $1, $2,
 		       ARRAY['orders:create','orders:read','orders:cancel','trades:read','positions:read'],
 		       100, 20, false, 'MC0031400000'
-		FROM brokers b WHERE b.code='DEMO'
+		FROM brokers b WHERE b.code='HOUSE'
 		ON CONFLICT (id) DO UPDATE SET token_hash=EXCLUDED.token_hash, token_prefix=EXCLUDED.token_prefix,
-		  permissions=EXCLUDED.permissions, quik_firm=EXCLUDED.quik_firm, revoked_at=NULL`,
+		  broker_id=EXCLUDED.broker_id, permissions=EXCLUDED.permissions, quik_firm=EXCLUDED.quik_firm, revoked_at=NULL`,
 		hash.SHA256Hex(token), prefix)
 	return err
 }

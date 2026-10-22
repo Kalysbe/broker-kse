@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,6 +11,10 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	grpc_health_v1 "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/reflection"
 	"statebroker/sbis/internal/adapters"
 	"statebroker/sbis/internal/adapters/kfb"
 	"statebroker/sbis/internal/app"
@@ -44,11 +49,10 @@ func main() {
 	}
 
 	kfbClient := kfb.New(cfg.KFBGatewayURL, cfg.KFBGatewayToken)
-	var extra []adapters.ExchangeAdapter
-	if kfbClient.Configured() {
-		extra = append(extra, kfbClient)
-	}
-	mgr := adapters.Default(extra...)
+	kfbClient.ConfigureRateLimit(rdb, cfg.KFBTradingRPS, cfg.KFBReadRPS)
+	// The saved profile (including its token) is loaded after construction.
+	// Keep the client registered so a profile loaded later can route orders.
+	mgr := adapters.Default(kfbClient)
 
 	application := &app.App{
 		Cfg:      cfg,
@@ -65,9 +69,34 @@ func main() {
 	}
 	gctx, gcancel := context.WithCancel(ctx)
 	defer gcancel()
+	if err := application.InitRealtimeAdmission(gctx); err != nil {
+		log.Fatal("realtime_rate_limits", zap.Error(err))
+	}
+	if err := application.InitKFBSettings(gctx); err != nil {
+		log.Fatal("kfb_settings", zap.Error(err))
+	}
+	if kfbClient.Configured() && rdb == nil {
+		log.Fatal("KFB shared rate limiter requires Redis")
+	}
 	application.StartGatewayLoop(gctx)
 
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: application.Router()}
+	grpcServer := grpc.NewServer(grpc.MaxRecvMsgSize(64<<10), grpc.MaxConcurrentStreams(128))
+	application.RegisterRealtime(grpcServer)
+	healthServer := health.NewServer()
+	healthServer.SetServingStatus("sbis.realtime.v1.RealtimeService", grpc_health_v1.HealthCheckResponse_SERVING)
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	reflection.Register(grpcServer)
+	grpcListener, err := net.Listen("tcp", cfg.GRPCAddr)
+	if err != nil {
+		log.Fatal("grpc_listen", zap.Error(err))
+	}
+	go func() {
+		log.Info("grpc listening", zap.String("addr", cfg.GRPCAddr))
+		if err := grpcServer.Serve(grpcListener); err != nil {
+			log.Fatal("grpc", zap.Error(err))
+		}
+	}()
 	go func() {
 		log.Info("listening", zap.String("addr", cfg.HTTPAddr))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -80,5 +109,6 @@ func main() {
 	<-ch
 	cctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	grpcServer.GracefulStop()
 	_ = srv.Shutdown(cctx)
 }

@@ -195,7 +195,13 @@ func (a *App) gatewaySubmit(ctx context.Context, p httpx.Principal, req gwOrderR
 		return nil, false, httpx.E(http.StatusBadRequest, "VALIDATION_ERROR", "account is not active")
 	}
 	if clientCode != "" && clientCode != req.ClientCode {
-		return nil, false, httpx.E(http.StatusBadRequest, "VALIDATION_ERROR", "client_code does not match account")
+		approved, approvalErr := a.approvedLoadParticipant(ctx, tx, p, req)
+		if approvalErr != nil {
+			return nil, false, approvalErr
+		}
+		if !approved {
+			return nil, false, httpx.E(http.StatusBadRequest, "VALIDATION_ERROR", "client_code does not match account")
+		}
 	}
 
 	var instrID uuid.UUID

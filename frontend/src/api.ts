@@ -1,5 +1,9 @@
 const API = import.meta.env.VITE_API_URL || "";
+import { socketRequest, closeSocket, subscribeSocket } from "./websocket";
+import { recordEndpoint } from "./dataSources";
+export const apiBaseURL = API;
 const TOKEN_KEY = "access_token";
+subscribeSocket(message => { if (message.type === "unauthorized") logoutToLogin(); });
 
 const PUBLIC_AUTH = ["/v1/auth/login", "/v1/auth/refresh", "/v1/auth/password-reset"];
 
@@ -85,6 +89,7 @@ export function getSessionSnapshot(): string {
 }
 
 export function logoutToLogin() {
+  closeSocket();
   const had = Boolean(localStorage.getItem(TOKEN_KEY));
   localStorage.removeItem(TOKEN_KEY);
   if (had) notifyAuth();
@@ -98,6 +103,9 @@ function isPublicAuth(path: string) {
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const sourcePage = window.location.pathname;
+  const sourceMethod = (init.method || "GET").toUpperCase();
+  const transport = isPublicAuth(path) ? "REST" : "WebSocket";
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (!isPublicAuth(path)) {
@@ -108,7 +116,17 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const token = getAccessToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
   }
-  const res = await fetch(`${API}${path}`, { ...init, headers });
+  recordEndpoint(sourcePage, sourceMethod, path, "Загрузка…", transport);
+  let res: Response;
+  try {
+    if (isPublicAuth(path)) res = await fetch(`${API}${path}`, { ...init, headers });
+    else {
+      const result = await socketRequest(API, getAccessToken() || "", path, { ...init, headers });
+      res = new Response(result.status === 204 ? null : JSON.stringify(result.data), { status: result.status || 500, headers: { "Content-Type": "application/json" } });
+    }
+  }
+  catch (error) { recordEndpoint(sourcePage, sourceMethod, path, "Ошибка соединения", transport); throw error; }
+  recordEndpoint(sourcePage, sourceMethod, path, res.ok ? "Данные получены" : `Ошибка ${res.status}`, transport);
   if (res.status === 204) return undefined as T;
   const data = await res.json();
   if (!res.ok) {

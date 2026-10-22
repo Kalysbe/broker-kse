@@ -3,7 +3,7 @@ info:
   title: Broker Gateway API
   version: "1.0.0"
   description: |
-    Этап 1. HTTPS REST для брокеров. WebSocket не используется.
+    HTTPS REST для команд брокеров; события реального времени передаются через gRPC streaming.
     Статусы и сделки читаются повторным опросом.
     `broker_id` берётся из токена. Лишние поля JSON возвращают 400.
 servers:

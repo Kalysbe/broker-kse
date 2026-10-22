@@ -97,16 +97,6 @@ func (a *App) submitOrder(ctx context.Context, p httpx.Principal, req orderReq) 
 	}
 	defer tx.Rollback(ctx)
 
-	var existingID uuid.UUID
-	var existingStatus string
-	err = tx.QueryRow(ctx, `SELECT id, status FROM orders WHERE broker_id=$1 AND client_order_id=$2`, p.BrokerID, req.ClientOrderID).
-		Scan(&existingID, &existingStatus)
-	if err == nil {
-		_ = tx.Rollback(ctx)
-		body, _ := a.orderJSON(ctx, existingID)
-		return body, true, nil
-	}
-
 	var clientID, brokerID uuid.UUID
 	var acctStatus, currency, accountCode, clientCode string
 	if err := tx.QueryRow(ctx, `
@@ -119,11 +109,34 @@ func (a *App) submitOrder(ctx context.Context, p httpx.Principal, req orderReq) 
 		Scan(&clientID, &brokerID, &acctStatus, &currency, &accountCode, &clientCode); err != nil {
 		return nil, false, httpx.ErrNotFound
 	}
-	if acctStatus != "ACTIVE" {
-		return nil, false, httpx.ErrAccountBlocked
-	}
 	if p.ClientID != nil && clientID != *p.ClientID {
 		return nil, false, httpx.ErrForbidden
+	}
+	// The account lock serializes retries. Sessions may belong to HOUSE while
+	// the selected account belongs to another broker; use the account's broker.
+	var existingID, existingAccount, existingInstrument uuid.UUID
+	var existingSide, existingType, existingTIF string
+	var existingQty decimal.Decimal
+	var existingPrice, existingStop *decimal.Decimal
+	err = tx.QueryRow(ctx, `
+		SELECT id, account_id, instrument_id, side, order_type, time_in_force, quantity, price, stop_price
+		FROM orders WHERE broker_id=$1 AND client_order_id=$2`, brokerID, req.ClientOrderID).
+		Scan(&existingID, &existingAccount, &existingInstrument, &existingSide, &existingType, &existingTIF, &existingQty, &existingPrice, &existingStop)
+	if err == nil {
+		samePrice := existingPrice == nil && px.IsZero() || existingPrice != nil && existingPrice.Equal(px)
+		sameStop := existingStop == nil && stop.IsZero() || existingStop != nil && existingStop.Equal(stop)
+		if existingAccount != acctID || existingInstrument != instrID || existingSide != side || existingType != ot || existingTIF != tif || !existingQty.Equal(qty) || !samePrice || !sameStop {
+			return nil, false, httpx.E(http.StatusConflict, "IDEMPOTENCY_CONFLICT", "Идентификатор уже используется для другой заявки")
+		}
+		_ = tx.Rollback(ctx)
+		body, err := a.orderJSON(ctx, existingID)
+		return body, true, err
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, err
+	}
+	if acctStatus != "ACTIVE" {
+		return nil, false, httpx.ErrAccountBlocked
 	}
 
 	var instrStatus, quikSymbol, instrBoard string
@@ -179,8 +192,9 @@ func (a *App) submitOrder(ctx context.Context, p httpx.Principal, req orderReq) 
 		return nil, false, fmt.Errorf("move NEW->VALIDATING: %w", err)
 	}
 	if (ot == "LIMIT" || ot == "STOP_LIMIT") && px.IsZero() {
-		_ = a.moveOrder(ctx, tx, orderID, orders.Validating, orders.Rejected, p.UserID)
-		_, _ = tx.Exec(ctx, `UPDATE orders SET reject_reason='PRICE_REQUIRED' WHERE id=$1`, orderID)
+		if err := a.rejectOrder(ctx, tx, orderID, orders.Validating, "PRICE_REQUIRED", p.UserID); err != nil {
+			return nil, false, err
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return nil, false, err
 		}
@@ -202,8 +216,9 @@ func (a *App) submitOrder(ctx context.Context, p httpx.Principal, req orderReq) 
 		if !errors.As(err, &api) {
 			return nil, false, fmt.Errorf("pre-trade risk: %w", err)
 		}
-		_ = a.moveOrder(ctx, tx, orderID, orders.Validated, orders.Rejected, p.UserID)
-		_, _ = tx.Exec(ctx, `UPDATE orders SET reject_reason=$2 WHERE id=$1`, orderID, api.Code)
+		if err := a.rejectOrder(ctx, tx, orderID, orders.Validated, api.Code, p.UserID); err != nil {
+			return nil, false, err
+		}
 		if err2 := tx.Commit(ctx); err2 != nil {
 			return nil, false, err2
 		}
@@ -217,22 +232,39 @@ func (a *App) submitOrder(ctx context.Context, p httpx.Principal, req orderReq) 
 
 	if !viaKFB {
 		if side == "BUY" {
+			if _, err := tx.Exec(ctx, "SAVEPOINT buy_reserve"); err != nil {
+				return nil, false, err
+			}
 			if err := a.postLedger(ctx, tx, acctID, currency, "ORDER", orderID, "Reserve for buy", "order-reserve-"+orderID.String(), []ledgerLine{
 				moneyLine("AVAILABLE", "RESERVE", notional, decimal.Zero),
 				moneyLine("BLOCKED", "RESERVE", decimal.Zero, notional),
 			}, &p.UserID); err != nil {
-				_ = a.moveOrder(ctx, tx, orderID, orders.Pending, orders.Rejected, p.UserID)
-				_, _ = tx.Exec(ctx, `UPDATE orders SET reject_reason='INSUFFICIENT_FUNDS' WHERE id=$1`, orderID)
+				// A rejected order must not commit the ledger writes made before
+				// the overdraft check (or leave PostgreSQL's transaction aborted).
+				if _, rollbackErr := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT buy_reserve"); rollbackErr != nil {
+					return nil, false, errors.Join(err, rollbackErr)
+				}
+				var api httpx.APIError
+				if !errors.As(err, &api) || api.Code != "INSUFFICIENT_FUNDS" {
+					return nil, false, err
+				}
+				if rejectErr := a.rejectOrder(ctx, tx, orderID, orders.Pending, "INSUFFICIENT_FUNDS", p.UserID); rejectErr != nil {
+					return nil, false, errors.Join(err, rejectErr)
+				}
 				if err2 := tx.Commit(ctx); err2 != nil {
 					return nil, false, err2
 				}
 				body, _ := a.orderJSON(ctx, orderID)
 				return body, false, nil
 			}
+			if _, err := tx.Exec(ctx, "RELEASE SAVEPOINT buy_reserve"); err != nil {
+				return nil, false, err
+			}
 		} else {
 			if err := a.blockPosition(ctx, tx, acctID, instrID, qty); err != nil {
-				_ = a.moveOrder(ctx, tx, orderID, orders.Pending, orders.Rejected, p.UserID)
-				_, _ = tx.Exec(ctx, `UPDATE orders SET reject_reason='INSUFFICIENT_POSITION' WHERE id=$1`, orderID)
+				if rejectErr := a.rejectOrder(ctx, tx, orderID, orders.Pending, "INSUFFICIENT_POSITION", p.UserID); rejectErr != nil {
+					return nil, false, errors.Join(err, rejectErr)
+				}
 				if err2 := tx.Commit(ctx); err2 != nil {
 					return nil, false, err2
 				}
@@ -251,10 +283,13 @@ func (a *App) submitOrder(ctx context.Context, p httpx.Principal, req orderReq) 
 	}
 	if !ok {
 		if !viaKFB && side == "BUY" {
-			_ = a.releaseBuyReserve(ctx, tx, acctID, currency, orderID, notional, p.UserID)
+			if err := a.releaseBuyReserve(ctx, tx, acctID, currency, orderID, notional, p.UserID); err != nil {
+				return nil, false, fmt.Errorf("release reserve: %w", err)
+			}
 		}
-		_ = a.moveOrder(ctx, tx, orderID, orders.Routing, orders.Failed, p.UserID)
-		_, _ = tx.Exec(ctx, `UPDATE orders SET reject_reason='ADAPTER_UNAVAILABLE' WHERE id=$1`, orderID)
+		if err := a.failOrder(ctx, tx, orderID, orders.Routing, "ADAPTER_UNAVAILABLE", p.UserID); err != nil {
+			return nil, false, err
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return nil, false, err
 		}
@@ -279,15 +314,28 @@ func (a *App) submitOrder(ctx context.Context, p httpx.Principal, req orderReq) 
 	})
 	a.Adapters.Release(ad.Code())
 	if err != nil {
-		_ = a.moveOrder(ctx, tx, orderID, orders.Sent, orders.Failed, p.UserID)
-		_, _ = tx.Exec(ctx, `UPDATE orders SET reject_reason='ADAPTER_ERROR' WHERE id=$1`, orderID)
+		if isGatewayRateLimit(err) {
+			if queueErr := a.queueRateLimitedOrder(ctx, tx, orderID, ad.Code(), err, p.UserID); queueErr != nil {
+				return nil, false, queueErr
+			}
+			if commitErr := tx.Commit(ctx); commitErr != nil {
+				return nil, false, commitErr
+			}
+			body, _ := a.orderJSON(ctx, orderID)
+			return body, false, nil
+		}
+		if failErr := a.failOrder(ctx, tx, orderID, orders.Sent, adapterFailureReason(ad.Code(), err), p.UserID); failErr != nil {
+			return nil, false, errors.Join(err, failErr)
+		}
 		if err2 := tx.Commit(ctx); err2 != nil {
 			return nil, false, err2
 		}
 		body, _ := a.orderJSON(ctx, orderID)
 		return body, false, nil
 	}
-	_, _ = tx.Exec(ctx, `UPDATE orders SET venue_order_id=$2 WHERE id=$1`, orderID, ack.VenueOrderID)
+	if _, err := tx.Exec(ctx, `UPDATE orders SET venue_order_id=$2 WHERE id=$1`, orderID, ack.VenueOrderID); err != nil {
+		return nil, false, fmt.Errorf("store venue order id: %w", err)
+	}
 	if err := a.moveOrder(ctx, tx, orderID, orders.Sent, orders.Acknowledged, p.UserID); err != nil {
 		return nil, false, err
 	}
@@ -305,14 +353,39 @@ func (a *App) submitOrder(ctx context.Context, p httpx.Principal, req orderReq) 
 		id.New(), orderID, orderID.String(), req.ClientOrderID); err != nil {
 		return nil, false, fmt.Errorf("outbox: %w", err)
 	}
+	if err := a.Audit.WriteTx(ctx, tx, "ORDER_CREATED", "order", &orderID, nil, req); err != nil {
+		return nil, false, fmt.Errorf("audit order: %w", err)
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, fmt.Errorf("commit order: %w", err)
 	}
 	telemetry.OrdersTotal.Inc()
-	a.Audit.Write(ctx, "ORDER_CREATED", "order", &orderID, nil, req)
 	body, _ := a.orderJSON(ctx, orderID)
 	return body, false, nil
+}
+
+func (a *App) rejectOrder(ctx context.Context, tx pgx.Tx, orderID uuid.UUID, from orders.Status, reason string, actor uuid.UUID) error {
+	if err := a.moveOrder(ctx, tx, orderID, from, orders.Rejected, actor); err != nil {
+		return fmt.Errorf("reject order: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE orders SET reject_reason=$2 WHERE id=$1`, orderID, reason); err != nil {
+		return fmt.Errorf("store reject reason: %w", err)
+	}
+	return nil
+}
+
+func (a *App) failOrder(ctx context.Context, tx pgx.Tx, orderID uuid.UUID, from orders.Status, reason string, actor uuid.UUID) error {
+	if err := a.moveOrder(ctx, tx, orderID, from, orders.Failed, actor); err != nil {
+		return fmt.Errorf("fail order: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE orders SET reject_reason=$2 WHERE id=$1`, orderID, reason); err != nil {
+		return fmt.Errorf("store failure reason: %w", err)
+	}
+	if err := a.Audit.WriteTx(ctx, tx, "ORDER_FAILED", "order", &orderID, nil, map[string]any{"reason": reason}); err != nil {
+		return fmt.Errorf("audit failure: %w", err)
+	}
+	return nil
 }
 
 func (a *App) releaseBuyReserve(ctx context.Context, tx pgx.Tx, accountID uuid.UUID, currency string, orderID uuid.UUID, notional decimal.Decimal, actor uuid.UUID) error {
@@ -367,18 +440,15 @@ func (a *App) applyFill(ctx context.Context, tx pgx.Tx, orderID, accountID, clie
 			moneyLine("BLOCKED", "BUY", gross, decimal.Zero),
 			moneyLine("CLEARING", "BUY", decimal.Zero, gross),
 		}, &actor); err != nil {
-			if err := a.ensureHouseBuckets(ctx, tx, accountID, currency); err == nil {
-				_ = a.postLedger(ctx, tx, accountID, currency, "TRADE", tradeID, "Buy fill", "trade-"+tradeID.String(), []ledgerLine{
-					moneyLine("BLOCKED", "BUY", gross, decimal.Zero),
-					moneyLine("SETTLED", "BUY", decimal.Zero, gross),
-				}, &actor)
-			}
+			return fmt.Errorf("post buy fill ledger: %w", err)
 		}
 		if commission.IsPositive() {
-			_ = a.postLedger(ctx, tx, accountID, currency, "COMMISSION", tradeID, "Commission", "comm-"+tradeID.String(), []ledgerLine{
+			if err := a.postLedger(ctx, tx, accountID, currency, "COMMISSION", tradeID, "Commission", "comm-"+tradeID.String(), []ledgerLine{
 				moneyLine("AVAILABLE", "COMMISSION", commission, decimal.Zero),
 				moneyLine("SETTLED", "COMMISSION", decimal.Zero, commission),
-			}, &actor)
+			}, &actor); err != nil {
+				return fmt.Errorf("post buy commission ledger: %w", err)
+			}
 		}
 		if err := a.applyPositionDelta(ctx, tx, accountID, instrID, fill.LastQty, fill.LastPx, "TRADE", tradeID); err != nil {
 			return err
@@ -391,10 +461,12 @@ func (a *App) applyFill(ctx context.Context, tx pgx.Tx, orderID, accountID, clie
 			return err
 		}
 		if commission.IsPositive() {
-			_ = a.postLedger(ctx, tx, accountID, currency, "COMMISSION", tradeID, "Commission", "comm-"+tradeID.String(), []ledgerLine{
+			if err := a.postLedger(ctx, tx, accountID, currency, "COMMISSION", tradeID, "Commission", "comm-"+tradeID.String(), []ledgerLine{
 				moneyLine("AVAILABLE", "COMMISSION", commission, decimal.Zero),
 				moneyLine("SETTLED", "COMMISSION", decimal.Zero, commission),
-			}, &actor)
+			}, &actor); err != nil {
+				return fmt.Errorf("post sell commission ledger: %w", err)
+			}
 		}
 		if err := a.applyPositionDelta(ctx, tx, accountID, instrID, fill.LastQty.Neg(), fill.LastPx, "TRADE", tradeID); err != nil {
 			return err
@@ -406,7 +478,9 @@ func (a *App) applyFill(ctx context.Context, tx pgx.Tx, orderID, accountID, clie
 		newStatus = orders.PartiallyFilled
 	}
 	var from string
-	_ = tx.QueryRow(ctx, `SELECT status FROM orders WHERE id=$1`, orderID).Scan(&from)
+	if err := tx.QueryRow(ctx, `SELECT status FROM orders WHERE id=$1`, orderID).Scan(&from); err != nil {
+		return fmt.Errorf("load order status before fill: %w", err)
+	}
 	if err := a.moveOrder(ctx, tx, orderID, orders.Status(from), newStatus, actor); err != nil {
 		return err
 	}
@@ -509,6 +583,10 @@ func (a *App) handleGetOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleListOrders(w http.ResponseWriter, r *http.Request) {
+	if a.KFB != nil && a.KFB.Configured() {
+		a.handleExchangeOrders(w, r)
+		return
+	}
 	p, _ := httpx.PrincipalFrom(r.Context())
 	var scope any
 	if p.ClientID != nil {

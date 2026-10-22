@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "КФБ Инвест",
+    "slug": "sbis-mobile",
+    "scheme": "sbis",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "kg.sbis.mobile"
+    },
+    "android": {
+      "package": "kg.sbis.mobile"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "name": "КФБ Инвест"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-secure-store",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": false
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

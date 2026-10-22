@@ -1,5 +1,49 @@
 # Deployment
 
+## Server deployment
+
+Repository: https://github.com/Kalysbe/broker-kse
+
+The standalone `docker-compose.production.yml` publishes the application on port
+80. The browser uses `/api` on the same origin, including WebSocket traffic.
+PostgreSQL and Redis have no published ports; diagnostic HTTP and gRPC ports bind
+only to server loopback. Long-running services restart after a host reboot.
+
+```bash
+git clone https://github.com/Kalysbe/broker-kse.git ~/broker-kse
+cd ~/broker-kse
+cp .env.example .env
+chmod 600 .env
+# Set APP_ENV=production, CORS_ORIGINS to the server URL, unique JWT_SECRET,
+# HMAC_PEPPER, GATEWAY_DEV_TOKEN, SEED_ADMIN_PASSWORD, and POSTGRES_PASSWORD.
+# POSTGRES_PASSWORD must be URL-safe (for example, a generated hex value).
+# Keep exchange credentials in .env and certificates in backend/certs/.
+mkdir -p backend/certs loadtest/reports
+sudo chown 65534:65534 loadtest/reports
+docker compose -f docker-compose.production.yml config --quiet
+docker compose -f docker-compose.production.yml build
+docker compose -f docker-compose.production.yml up -d
+curl --fail http://127.0.0.1/health/ready
+```
+
+Migrations and administrator seeding complete before the API starts. Seeding
+updates the administrator password from `.env` on subsequent deployments. Keep
+the JWT secret stable because saved exchange settings are encrypted with it.
+
+For an update, back up the database, fetch the intended commit, rebuild, then run
+`up -d`. To roll back application code, check out the previous commit and repeat
+the build and start commands; do not remove volumes or automatically reverse
+database migrations. Configure TLS at the edge when a hostname is assigned.
+
+```bash
+mkdir -p backups
+chmod 700 backups
+docker compose -f docker-compose.production.yml exec -T postgres \
+  pg_dump -U sbis sbis | gzip > "backups/sbis-$(date +%Y%m%d-%H%M%S).sql.gz"
+docker compose -f docker-compose.production.yml ps
+docker compose -f docker-compose.production.yml logs --tail=100 api worker nginx
+```
+
 ## Environments
 
 | Variable | Purpose |

@@ -29,8 +29,8 @@ var allowed = map[Status][]Status{
 	Validated:       {Pending, Rejected},
 	Pending:         {Routing, Cancelled, Rejected, Failed},
 	Routing:         {Sent, Failed, Rejected},
-	Sent:            {Acknowledged, Rejected, Failed, CancelPending},
-	Acknowledged:    {PartiallyFilled, Filled, CancelPending, Expired, Rejected},
+	Sent:            {Acknowledged, Rejected, Failed, CancelPending, Queued},
+	Acknowledged:    {PartiallyFilled, Filled, CancelPending, Expired, Rejected, Failed, Cancelled},
 	PartiallyFilled: {PartiallyFilled, Filled, CancelPending, Expired, Cancelled},
 	CancelPending:   {Cancelled, PartiallyFilled, Filled, Rejected},
 }

@@ -75,7 +75,7 @@ export function PositionsPage() {
   const q = useQuery({
     queryKey: ["positions"],
     queryFn: () => api<PositionsResponse>("/v1/positions"),
-    refetchInterval: 15000,
+    refetchInterval: false,
     retry: 1,
   });
   const items = q.data?.items || [];

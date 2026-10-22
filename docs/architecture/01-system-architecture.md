@@ -17,7 +17,7 @@ Every operation is traceable end-to-end and has an audit trail.
 
 A **modular monolith** is the first production shape.
 
-- One deployable Go binary for the HTTP/WebSocket API
+- One deployable Go binary for the HTTP/gRPC API
 - One deployable Go binary for background workers (same modules, different `main`)
 - Module boundaries are package-level: `domain`, `service`, `repository`, `handler`, `dto`, `validation`
 - No cross-module table writes except through published services
@@ -29,7 +29,7 @@ Microservices are not created for their own sake.
 
 ```
  React Frontend (Back Office / Trading / Admin / Client Portal)
-                 HTTPS + WebSocket
+                 HTTPS + gRPC streaming
                          |
                    Nginx (TLS)
                          |
@@ -52,7 +52,7 @@ Microservices are not created for their own sake.
 
 | Bounded context | Package | Responsibility |
 |---|---|---|
-| Platform | `internal/platform` | Config, DB, HTTP, errors, money, IDs, telemetry, WS |
+| Platform | `internal/platform` | Config, DB, HTTP, gRPC, errors, money, IDs, telemetry |
 | Auth | `internal/auth` | Login, refresh, 2FA, sessions, step-up, password reset |
 | Users / Roles | `internal/users`, `internal/roles` | Staff directory, RBAC |
 | Brokers | `internal/brokers` | Broker tenants, API tokens, IP allowlists |

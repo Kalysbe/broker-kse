@@ -3,7 +3,7 @@
 Direction of compile-time imports. Lower layers must not import upper layers.
 
 ```
-platform (config, db, httpx, money, id, log, telemetry, ws, outbox)
+platform (config, db, httpx, grpc, money, id, log, telemetry, outbox)
     ↑
 auth, roles, users
     ↑

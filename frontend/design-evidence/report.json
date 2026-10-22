@@ -1,0 +1,31 @@
+{
+  "contract": "Public marketing for КФБ Инвест uses the existing mobile navy/light palette, a neutral interactive phone illustration with hidden balances, feature overview, three order steps, FAQ and direct Android APK download. Anonymous / renders the landing; /welcome always renders marketing; /download provides compatibility, test-network status and installation. Protected cabinet routes retain authentication. Phone visitors to the cabinet get a dismissible native dialog; iPhone gets a browser alternative. No invented returns, personal account data or store links. Static public content does not require the broker API. Target viewports: 1440x900, 390x844 and 320x740.",
+  "targetViewports": ["1440x900", "390x844", "320x740"],
+  "accessibility": {
+    "status": "pass",
+    "evidence": "Browser accessibility tree exposes named navigation, one public h1, headings, links, preview toggle state, FAQ summaries and a labelled native dialog. Tab moves to the dialog CTA, background is inert, Escape and Continue close it. Visible focus was inspected in the Android screenshot. Controls are at least 44px tall except plain contextual links; text uses dark ink/navy on light surfaces. The public UI has no continuous animation; the stylesheet disables transition and smooth scrolling under prefers-reduced-motion. No screen-reader or physical-device certification is claimed."
+  },
+  "responsive": {
+    "status": "pass",
+    "evidence": "Rendered desktop and phone screenshots inspected. Browser DOM measurements: at 390px, document width 390, scroll container/client width both 375; at 320px, document width 320, scroll container/client width both 305 and header links remain within the viewport. Mobile menu opens/closes, FAQ expands, and hash navigation reaches installation in the nested scrolling container. Decorative orbit overflow was clipped after the first narrow-screen review."
+  },
+  "contentStates": {
+    "loading": { "status": "not-applicable", "reason": "Marketing and release metadata are built locally; no asynchronous API content is loaded. The browser handles the file-transfer progress." },
+    "empty": { "status": "pass", "evidence": "The unavailable-release browser fixture renders a clear unavailable notice and browser-cabinet alternative, with zero a[download] elements. The preparation script also handles missing/empty APK without retaining a stale release copy." },
+    "error": { "status": "pass", "evidence": "HTTP integration check verifies missing APK returns 404, never the SPA HTML. Browser download feedback offers retry without asserting successful installation. Missing-release UI was rendered and captured." },
+    "partial": { "status": "pass", "evidence": "iPhone fixture renders Android incompatibility and Continue in browser without an Android download CTA. The rest of the public site and cabinet entry remain accessible." },
+    "success": { "status": "pass", "evidence": "The actual browser APK button downloaded kfb-invest-android.apk to Downloads. Independent HTTP check confirms 200, Android APK MIME, attachment header, ZIP magic, 22821086 bytes and SHA-256 bbf6f18e0b9c03298023f6fc3aca969c7009f3f6fc9460d85dec12e13c606820. Production Vite build and strict TypeScript check passed." },
+    "permission": { "status": "pass", "evidence": "Android fixture starting at /trading is redirected to /login and receives the mobile offer. Continue preserves the login form, and revisiting the cabinet does not reopen the offer during the session. No authenticated broker data or financial actions were exercised." }
+  },
+  "renderedEvidence": [
+    { "viewport": "1440x900", "artifact": "desktop-1440.png", "observation": "Desktop hero, direct-download entry, neutral portfolio mockup and preview controls." },
+    { "viewport": "1440x900", "artifact": "features-1440.png", "observation": "Three feature columns with complete Russian copy and no clipped text." },
+    { "viewport": "390x844", "artifact": "mobile-390.png", "observation": "Mobile landing hero and primary CTA; no horizontal scroll." },
+    { "viewport": "390x844", "artifact": "android-prompt-390.png", "observation": "Android UA fixture: mobile cabinet offer, test label, APK CTA and Continue in browser." },
+    { "viewport": "390x844", "artifact": "iphone-prompt-390.png", "observation": "iPhone UA fixture: honest Android-only status and browser alternative." },
+    { "viewport": "390x844", "artifact": "download-390.png", "observation": "Download page and file-transfer feedback after actual browser download." },
+    { "viewport": "390x844", "artifact": "unavailable-390.png", "observation": "Missing release fixture: unavailable notice replaces the APK link." },
+    { "viewport": "320x740", "artifact": "narrow-320.png", "observation": "Small-phone header, wrapping hero, full-width CTA and clipped decorative orbit." }
+  ],
+  "limits": "Android/iPhone platform checks use a local navigator fixture in device-test.html; no physical handset was used in this change. A public internet domain and production mobile API have not been configured. The existing APK remains an internal test build for the broker network."
+}

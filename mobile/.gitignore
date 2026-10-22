@@ -1,0 +1,15 @@
+node_modules/
+.expo/
+dist/
+dist-native/
+dist-live/
+web-build/
+expo-env.d.ts
+*.tsbuildinfo
+.env.local
+.android-tools/
+.gradle-user-home/
+android/
+.dev-data/
+artifacts/
+

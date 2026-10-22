@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
+	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -17,19 +19,29 @@ import (
 	"statebroker/sbis/internal/platform/config"
 	"statebroker/sbis/internal/platform/httpx"
 	"statebroker/sbis/internal/platform/storage"
+	"statebroker/sbis/internal/ratelimit"
 )
 
 type App struct {
-	Cfg      config.Config
-	DB       *pgxpool.Pool
-	Redis    *redis.Client
-	Log      *zap.Logger
-	Audit    audit.Logger
-	Adapters *adapters.Manager
-	KFB      *kfb.Client
-	Store    storage.Store
-	HouseID  uuid.UUID
-	Limiter  *gateway.Limiter
+	Cfg                config.Config
+	DB                 *pgxpool.Pool
+	Redis              *redis.Client
+	Log                *zap.Logger
+	Audit              audit.Logger
+	Adapters           *adapters.Manager
+	KFB                *kfb.Client
+	Store              storage.Store
+	HouseID            uuid.UUID
+	Limiter            *gateway.Limiter
+	LoadMu             sync.Mutex
+	LoadRun            *loadTestRun
+	KFBSettings        kfbSettingsState
+	KFBStreamError     atomic.Pointer[string]
+	KFBStreamConnected atomic.Bool
+	KFBLastReconcile   atomic.Int64
+	KFBSyncMu          sync.Mutex
+	RealtimeAdmission  *ratelimit.Admission
+	RealtimePolicyMu   sync.Mutex
 }
 
 func (a *App) perm(code string) func(http.Handler) http.Handler {

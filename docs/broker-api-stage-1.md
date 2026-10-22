@@ -1,6 +1,6 @@
 # Руководство для брокеров — этап 1
 
-Шлюз принимает заявки по **HTTPS REST**. WebSocket брокерам не нужен: заявки создаются запросом, статусы и сделки читаются повторным опросом.
+Шлюз принимает команды по **HTTPS REST**, а события реального времени передаёт через **gRPC bidirectional streaming + Protobuf**.
 
 ```text
 Ваша система  →  HTTPS + Bearer-токен  →  Gateway  →  FIX  →  QUIK
@@ -160,7 +160,7 @@ curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/v1/firm"
 
 ## 10. Что не входит в этап 1
 
-- WebSocket и webhook
+- webhook
 - Входящий FIX от брокера
 - Replace / amend
 - Рыночные данные в брокерском API

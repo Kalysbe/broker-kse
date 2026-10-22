@@ -55,7 +55,7 @@ func (a *App) venueAccountForClient(ctx context.Context, clientCode string) stri
 	if acc := venueAccountFromRows(snap.Accounts, code); acc != "" {
 		return acc
 	}
-	pos, err := a.KFB.FetchPositions(ctx)
+	pos, err := a.kfbPositions(ctx)
 	if err != nil {
 		return ""
 	}
@@ -235,7 +235,7 @@ func (a *App) venueCurrencyForClient(ctx context.Context, clientCode string) str
 	snap := a.KFB.Snapshot()
 	rows := snap.Positions
 	if len(rows) == 0 {
-		if pos, err := a.KFB.FetchPositions(ctx); err == nil {
+		if pos, err := a.kfbPositions(ctx); err == nil {
 			rows = pos.Positions
 		}
 	}

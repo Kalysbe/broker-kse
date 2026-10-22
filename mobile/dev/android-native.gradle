@@ -1,0 +1,33 @@
+// Applied only to the generated Windows build copy, after Expo prebuild.
+// Android's Ninja must hash long codegen object paths, and each native build
+// gets a bounded compiler pool rather than spawning one process per CPU.
+subprojects { nativeProject ->
+    ['com.android.application', 'com.android.library'].each { pluginId ->
+        nativeProject.pluginManager.withPlugin(pluginId) {
+            nativeProject.extensions.getByName('androidComponents').finalizeDsl { android ->
+                android.defaultConfig.externalNativeBuild.cmake.arguments.addAll([
+                    '-DCMAKE_OBJECT_PATH_MAX=240',
+                    '-DCMAKE_JOB_POOLS=sbis_compile=2;sbis_link=1',
+                    '-DCMAKE_JOB_POOL_COMPILE=sbis_compile',
+                    '-DCMAKE_JOB_POOL_LINK=sbis_link'
+                ])
+                if (pluginId == 'com.android.application' && rootProject.hasProperty('sbisPhone')) {
+                    def phone = android.buildTypes.maybeCreate('localPhone')
+                    phone.initWith(android.buildTypes.getByName('release'))
+                    phone.matchingFallbacks = ['release']
+                    phone.signingConfig = android.signingConfigs.getByName('debug')
+                    phone.applicationIdSuffix = '.localphone'
+                    phone.debuggable = false
+                    phone.jniDebuggable = false
+                    phone.minifyEnabled = false
+                    phone.shrinkResources = false
+                    // Extract ARM libraries on install, including when the SDK
+                    // emulator uses its ARM translation bridge for this APK.
+                    android.packagingOptions.jniLibs.useLegacyPackaging = true
+                    android.sourceSets.getByName('localPhone').manifest.srcFile(rootProject.file('../.sbis-phone/AndroidManifest.xml'))
+                    android.sourceSets.getByName('localPhone').res.srcDir(rootProject.file('../.sbis-phone/res'))
+                }
+            }
+        }
+    }
+}

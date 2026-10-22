@@ -37,17 +37,21 @@ No stack traces in responses.
 | Reports | `/v1/reports` |
 | Admin | `/v1/admin`, `/v1/audit`, `/v1/logs`, `/v1/notifications` |
 | Health | `/health`, `/health/live`, `/health/ready`, `/ready` |
-| Broker Gateway (stage 1) | `/api/v1/*` (Bearer `sk_test_` / `sk_live_`, polling, no WebSocket) |
+| Broker Gateway | `/api/v1/*` for commands; gRPC stream for realtime events |
 | Swagger | `/swagger`, `/openapi.yaml` |
-| WebSocket | `/v1/ws` (staff UI only; brokers poll REST) |
+| gRPC streaming | `RealtimeService.Connect` on port `19090` |
 
 Staff errors use `{error:{code,message,request_id}}`. Broker Gateway errors use `{error:"text",details:{}}`.
 
-## WebSocket topics
+## gRPC bidirectional streaming
 
-`orders`, `executions`, `trades`, `marketdata`, `notifications`, `adapters`, `alerts`
+The Protobuf contract is `backend/proto/realtime/v1/realtime.proto`. Clients send
+subscribe/unsubscribe/ping commands and receive typed envelopes for `orders`,
+`executions`, `trades`, `marketdata`, `positions`, `notifications`, `adapters`
+and `alerts`. Authentication uses `authorization: Bearer <access_token>` gRPC
+metadata.
 
-Subscribe after auth frame. Fanout via Redis pub/sub so multiple API replicas work.
+Fanout uses the durable Redis stream so multiple API replicas can serve clients.
 
 ## Versioning
 

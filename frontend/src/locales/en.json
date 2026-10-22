@@ -40,6 +40,7 @@
     "audit": "Audit",
     "notifications": "Notifications",
     "health": "System health",
+    "loadTesting": "Load testing",
     "profile": "Profile"
   },
   "auth": {
@@ -104,7 +105,7 @@
     "TRADING_ACCOUNT_MISSING": "Trading account was not found on the exchange for this client.",
     "CLIENT_CODE_EXISTS": "This client code is already in use. Choose another.",
     "ADAPTER_UNAVAILABLE": "The exchange is unavailable. The order was not sent.",
-    "ADAPTER_ERROR": "KSE rejected the order. Check the account, client code and order parameters.",
+    "ADAPTER_ERROR": "Order adapter failure. See diagnostics for the cause and failure source.",
     "UNSUPPORTED_ORDER_TYPE": "This order type is not accepted by the exchange.",
     "INSUFFICIENT_FUNDS": "Insufficient funds.",
     "INSUFFICIENT_POSITION": "Insufficient securities to sell.",
@@ -199,6 +200,11 @@
     "status": "Connection",
     "online": "Connected",
     "offline": "Offline",
+    "checking": "Checking…",
+    "unavailable": "Gateway unavailable",
+    "notConfigured": "Not configured",
+    "notSpecified": "Not specified",
+    "noData": "No data",
     "firm": "Firm",
     "quikFirm": "Firm code",
     "token": "Token",
@@ -207,8 +213,31 @@
     "accounts": "KSE accounts",
     "positions": "KSE positions",
     "instruments": "KSE instruments",
+    "lastCheck": "Last checked",
+    "technicalDetails": "Technical details",
+    "howToConnect": "How to connect KSE:",
+    "stepUrl": "Set the gateway address reachable from Docker in",
+    "stepToken": "Set the access token issued by KSE in",
+    "stepRestart": "Restart the API and click “Check connection” again.",
+    "emptyConnected": "KSE is connected, but this section has no data yet.",
+    "emptyDisconnected": "Data will appear after KSE is connected.",
+    "issue": {
+      "notConfigured": { "title": "KSE integration is not configured", "description": "The gateway address or KSE access token is missing. Exchange requests are not being sent." },
+      "authorization": { "title": "KSE rejected authorization", "description": "The gateway is reachable, but the token was rejected. Check its expiry and permissions." },
+      "timeout": { "title": "KSE did not respond in time", "description": "Check the network, VPN, firewall, and KSE gateway availability." },
+      "gatewayUnavailable": { "title": "KSE gateway is unavailable", "description": "Settings are present, but the gateway connection failed. Check its address, network, and service status." },
+      "apiUnavailable": { "title": "Could not load integration status", "description": "The UI did not receive a response from the broker API. Check that the API is running." }
+    },
+    "col": {
+      "account_id": "KSE account", "trading_account": "Trading account", "client_code": "Client code", "currency": "Currency", "status": "Status",
+      "kind": "Position type", "symbol": "Instrument", "quantity": "Quantity", "avg_price": "Average price", "available_qty": "Available", "blocked_qty": "Blocked",
+      "quik_symbol": "QUIK code", "internal_symbol": "Internal code", "board": "Trading board", "security_type": "Security type"
+    },
+    "value": { "ONLINE": "Online", "OFFLINE": "Offline", "ACTIVE": "Active", "INACTIVE": "Inactive", "CASH": "Cash", "INSTRUMENT": "Securities", "STOCK": "Stock", "BOND": "Bond" },
     "footerOnline": "KSE · connected",
     "footerOffline": "KSE · offline",
+    "footerNotConfigured": "integration is not configured",
+    "footerUnavailable": "gateway unavailable — open the KSE page",
     "footerChecking": "KSE · checking connection…"
   },
   "depository": {

@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
 	"statebroker/sbis/internal/adapters"
@@ -12,9 +14,15 @@ import (
 )
 
 func (a *App) StartGatewayLoop(ctx context.Context) {
+	a.startKFBRealtime(ctx)
+	if a.Cfg.ExchangeReadOnly {
+		return
+	}
 	t := time.NewTicker(250 * time.Millisecond)
+	tradeTicker := time.NewTicker(5 * time.Second)
 	go func() {
 		defer t.Stop()
+		defer tradeTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
@@ -22,6 +30,10 @@ func (a *App) StartGatewayLoop(ctx context.Context) {
 			case <-t.C:
 				if err := a.ProcessGatewayQueue(ctx); err != nil && a.Log != nil {
 					a.Log.Warn("gateway_queue", zap.Error(err))
+				}
+			case <-tradeTicker.C:
+				if err := a.syncKFBTrades(ctx); err != nil && a.Log != nil {
+					a.Log.Warn("kfb_trades", zap.Error(err))
 				}
 			}
 		}
@@ -32,7 +44,10 @@ func (a *App) ProcessGatewayQueue(ctx context.Context) error {
 	if err := a.routeQueuedOrders(ctx); err != nil {
 		return err
 	}
-	return a.completeCancels(ctx)
+	if err := a.completeCancels(ctx); err != nil {
+		return err
+	}
+	return a.syncKFBOrderStatuses(ctx)
 }
 
 func (a *App) routeQueuedOrders(ctx context.Context) error {
@@ -77,9 +92,12 @@ func (a *App) routeOneGatewayOrder(ctx context.Context, orderID uuid.UUID) error
 		       COALESCE(a.trading_account, a.account_number)
 		FROM orders o
 		JOIN trading_accounts a ON a.id=o.account_id
-		WHERE o.id=$1 FOR UPDATE`, orderID).
+		WHERE o.id=$1 FOR UPDATE OF o SKIP LOCKED`, orderID).
 		Scan(&status, &side, &ot, &tif, &coid, &symbol, &board, &clientCode, &quikFirm, &qty, &price, &accountCode)
 	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil
+		}
 		return err
 	}
 	if status != string(orders.Queued) {
@@ -88,7 +106,13 @@ func (a *App) routeOneGatewayOrder(ctx context.Context, orderID uuid.UUID) error
 	if err := a.moveOrder(ctx, tx, orderID, orders.Queued, orders.Routing, uuid.Nil); err != nil {
 		return err
 	}
-	ad, ok := a.Adapters.PickKind("EXCHANGE", "WEIGHTED")
+	var ad adapters.ExchangeAdapter
+	var ok bool
+	if a.KFB != nil && a.KFB.Configured() {
+		ad, ok = a.KFB, true
+	} else {
+		ad, ok = a.Adapters.PickKind("EXCHANGE", "WEIGHTED")
+	}
 	if !ok {
 		ad, ok = a.Adapters.PickKind("FIX", "WEIGHTED")
 	}
@@ -96,9 +120,7 @@ func (a *App) routeOneGatewayOrder(ctx context.Context, orderID uuid.UUID) error
 		ad, ok = a.Adapters.Pick("WEIGHTED")
 	}
 	if !ok {
-		_ = a.moveOrder(ctx, tx, orderID, orders.Routing, orders.Failed, uuid.Nil)
-		_, _ = tx.Exec(ctx, `UPDATE orders SET reject_reason='ADAPTER_UNAVAILABLE' WHERE id=$1`, orderID)
-		return tx.Commit(ctx)
+		return nil // rollback to QUEUED until an adapter is available
 	}
 	if err := a.moveOrder(ctx, tx, orderID, orders.Routing, orders.Sent, uuid.Nil); err != nil {
 		return err
@@ -122,11 +144,24 @@ func (a *App) routeOneGatewayOrder(ctx context.Context, orderID uuid.UUID) error
 	})
 	a.Adapters.Release(ad.Code())
 	if err != nil {
-		_ = a.moveOrder(ctx, tx, orderID, orders.Sent, orders.Failed, uuid.Nil)
-		_, _ = tx.Exec(ctx, `UPDATE orders SET reject_reason='ADAPTER_ERROR' WHERE id=$1`, orderID)
+		if isGatewayRateLimit(err) {
+			if queueErr := a.queueRateLimitedOrder(ctx, tx, orderID, ad.Code(), err, uuid.Nil); queueErr != nil {
+				return queueErr
+			}
+			return tx.Commit(ctx)
+		}
+		reason := adapterFailureReason(ad.Code(), err)
+		if failErr := a.failOrder(ctx, tx, orderID, orders.Sent, reason, uuid.Nil); failErr != nil {
+			return failErr
+		}
+		if auditErr := a.Audit.WriteTx(ctx, tx, "ORDER_ADAPTER_FAILED", "order", &orderID, nil, json.RawMessage(reason)); auditErr != nil {
+			return auditErr
+		}
 		return tx.Commit(ctx)
 	}
-	_, _ = tx.Exec(ctx, `UPDATE orders SET venue_order_id=$2 WHERE id=$1`, orderID, ack.VenueOrderID)
+	if _, err := tx.Exec(ctx, `UPDATE orders SET venue_order_id=$2, reject_reason=NULL WHERE id=$1`, orderID, ack.VenueOrderID); err != nil {
+		return err
+	}
 	if err := a.moveOrder(ctx, tx, orderID, orders.Sent, orders.Acknowledged, uuid.Nil); err != nil {
 		return err
 	}
@@ -169,8 +204,19 @@ func (a *App) completeCancels(ctx context.Context) error {
 			ad, ok = a.Adapters.Pick("WEIGHTED")
 		}
 		if ok {
-			_ = ad.CancelOrder(ctx, item.venue, item.coid, item.qty)
+			cancelErr := ad.CancelOrder(ctx, item.venue, item.coid, item.qty)
 			a.Adapters.Release(ad.Code())
+			if cancelErr != nil {
+				if auditErr := a.Audit.Write(ctx, "ORDER_CANCEL_ADAPTER_ERROR", "order", &item.id, nil, json.RawMessage(adapterFailureReason(ad.Code(), cancelErr))); auditErr != nil {
+					return auditErr
+				}
+				if a.Log != nil {
+					a.Log.Warn("gateway_cancel", zap.String("order_id", item.id.String()), zap.Error(cancelErr))
+				}
+				continue
+			}
+		} else {
+			continue
 		}
 		tx, err := a.DB.Begin(ctx)
 		if err != nil {

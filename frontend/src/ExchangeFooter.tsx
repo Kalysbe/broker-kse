@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "./api";
 
 export type KFBHealth = {
+  environment?: string;
   connected: boolean;
   health: string;
   error?: string;
@@ -75,16 +76,20 @@ export function ExchangeFooter() {
     label = t("kfb.footerOnline");
     tone = "online";
   }
+  const errorLabel = /not configured/i.test(d?.error || "")
+    ? t("kfb.footerNotConfigured")
+    : t("kfb.footerUnavailable");
 
   return (
-    <footer className="fixed bottom-0 inset-x-0 z-50 h-8 bg-navy text-white flex items-center justify-between px-4 text-xs tracking-wide select-none">
+    <footer className="fixed bottom-0 inset-x-0 z-50 h-8 border-t border-slate-200 bg-white/95 text-slate-600 backdrop-blur flex items-center justify-between px-4 text-xs tracking-wide select-none">
       <div className="flex items-center gap-2 min-w-0">
         <span className={`status-dot status-dot-${tone}`} aria-hidden />
-        <span className={`truncate ${tone === "online" ? "text-[#22c55e]" : ""}`}>{label}</span>
-        {d?.error && !online ? <span className="text-red-300 truncate hidden sm:inline">· {d.error}</span> : null}
+        <span className={`truncate font-medium ${tone === "online" ? "text-emerald-600" : ""}`}>{label}</span>
+        {d?.environment && <span className={`rounded px-2 py-0.5 font-semibold ${d.environment === "production" ? "bg-amber-100 text-amber-900" : "bg-blue-50 text-blue-800"}`}>{d.environment === "production" ? "Боевой сервер" : d.environment === "test" ? "Тестовый сервер" : "Другой сервер"}</span>}
+        {d?.error && !online ? <span className="text-rose-600 truncate hidden sm:inline">· {errorLabel}</span> : null}
       </div>
       <time
-        className={`tabular-nums shrink-0 ml-4 ${tone === "online" ? "text-[#22c55e] status-time-online" : "text-white/90"}`}
+        className={`tabular-nums shrink-0 ml-4 ${tone === "online" ? "text-emerald-600 status-time-online" : "text-slate-500"}`}
         dateTime={now.toISOString()}
       >
         {stamp}

@@ -4,7 +4,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "prepare:mobile": "node scripts/prepare-mobile-download.mjs",
+    "predev": "npm run prepare:mobile",
     "dev": "vite",
+    "prebuild": "npm run prepare:mobile",
     "build": "vite build",
     "preview": "vite preview"
   },

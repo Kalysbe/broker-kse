@@ -49,6 +49,18 @@ func (a *App) availableBalance(ctx context.Context, tx pgx.Tx, cashAccountID uui
 }
 
 func (a *App) postLedger(ctx context.Context, tx pgx.Tx, accountID uuid.UUID, currency, refType string, refID uuid.UUID, desc, idem string, lines []ledgerLine, actor *uuid.UUID) error {
+	return a.postLedgerWithOverdraftCheck(ctx, tx, accountID, currency, refType, refID, desc, idem, lines, actor, true)
+}
+
+// postReconciliationLedger records an execution which has already happened at
+// the exchange. It must not discard the external fact merely because the local
+// cash snapshot is incomplete; a negative AVAILABLE balance then exposes the
+// reconciliation gap until the corresponding funding is imported.
+func (a *App) postReconciliationLedger(ctx context.Context, tx pgx.Tx, accountID uuid.UUID, currency, refType string, refID uuid.UUID, desc, idem string, lines []ledgerLine) error {
+	return a.postLedgerWithOverdraftCheck(ctx, tx, accountID, currency, refType, refID, desc, idem, lines, nil, false)
+}
+
+func (a *App) postLedgerWithOverdraftCheck(ctx context.Context, tx pgx.Tx, accountID uuid.UUID, currency, refType string, refID uuid.UUID, desc, idem string, lines []ledgerLine, actor *uuid.UUID, enforceOverdraft bool) error {
 	if err := a.ensureCashAccounts(ctx, tx, accountID, currency); err != nil {
 		return err
 	}
@@ -84,6 +96,9 @@ func (a *App) postLedger(ctx context.Context, tx pgx.Tx, accountID uuid.UUID, cu
 			id.New(), txID, ca, currency, l.Debit, l.Credit, l.EntryType, refType, refID); err != nil {
 			return err
 		}
+	}
+	if !enforceOverdraft {
+		return nil
 	}
 	availID, err := a.cashAccountID(ctx, tx, accountID, currency, "AVAILABLE")
 	if err != nil {

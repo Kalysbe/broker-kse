@@ -14,20 +14,20 @@ import (
 )
 
 type marketItem struct {
-	ID            string `json:"id"`
-	Ticker        string `json:"ticker"`
-	ISIN          string `json:"isin"`
-	Name          string `json:"name"`
-	Board         string `json:"board"`
-	Currency      string `json:"currency"`
-	Status        string `json:"status"`
-	SecurityType  string `json:"security_type"`
-	Last          string `json:"last,omitempty"`
-	Bid           string `json:"bid,omitempty"`
-	Ask           string `json:"ask,omitempty"`
-	Volume        string `json:"volume,omitempty"`
-	Source        string `json:"source"`
-	VenueSymbol   string `json:"venue_symbol"`
+	ID           string `json:"id"`
+	Ticker       string `json:"ticker"`
+	ISIN         string `json:"isin"`
+	Name         string `json:"name"`
+	Board        string `json:"board"`
+	Currency     string `json:"currency"`
+	Status       string `json:"status"`
+	SecurityType string `json:"security_type"`
+	Last         string `json:"last,omitempty"`
+	Bid          string `json:"bid,omitempty"`
+	Ask          string `json:"ask,omitempty"`
+	Volume       string `json:"volume,omitempty"`
+	Source       string `json:"source"`
+	VenueSymbol  string `json:"venue_symbol"`
 }
 
 func (a *App) handleMarket(w http.ResponseWriter, r *http.Request) {
@@ -45,18 +45,33 @@ func (a *App) handleMarketBook(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	var symbol, board string
+	if err := a.DB.QueryRow(r.Context(), `SELECT COALESCE(NULLIF(quik_symbol,''), ticker), COALESCE(board,'') FROM instruments WHERE id=$1`, idv).Scan(&symbol, &board); err != nil {
+		httpx.WriteError(w, r, httpx.ErrNotFound)
+		return
+	}
+	if a.KFB != nil && a.KFB.Configured() {
+		if quote := a.liveKFBQuote(r.Context(), symbol, board); quote != nil {
+			httpx.WriteJSON(w, 200, map[string]any{"instrument_id": idv, "symbol": symbol, "board": board, "currency": quote["currency"], "last": quote["last"], "updated_at": quote["updated_at"], "live": true, "source": "KFB", "bids": quoteLevels(quote["bids"]), "asks": quoteLevels(quote["offers"])})
+			return
+		}
+		if live, liveErr := a.KFB.FetchOrderBook(r.Context(), symbol, board); liveErr == nil {
+			httpx.WriteJSON(w, 200, map[string]any{"instrument_id": idv, "symbol": live.Symbol, "board": live.Board, "currency": live.Currency, "last": live.Last, "updated_at": live.UpdatedAt, "live": live.Live, "source": live.Source, "bids": live.Bids, "asks": live.Asks})
+			return
+		}
+	}
 	bids, asks, err := a.orderBook(r.Context(), idv)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, 200, map[string]any{"instrument_id": idv, "bids": bids, "asks": asks})
+	httpx.WriteJSON(w, 200, map[string]any{"instrument_id": idv, "bids": bids, "asks": asks, "live": false, "source": "local"})
 }
 
 func (a *App) marketBoard(ctx context.Context) ([]marketItem, error) {
 	if a.KFB != nil && a.KFB.Configured() {
 		snap := a.KFB.Snapshot()
-		stale := snap.LastCheckAt == nil || time.Since(*snap.LastCheckAt) > 12*time.Second
+		stale := snap.LastCheckAt == nil || (!a.KFBStreamConnected.Load() && time.Since(*snap.LastCheckAt) > 12*time.Second)
 		if stale || len(snap.Instruments) == 0 {
 			snap = a.KFB.Refresh(ctx)
 			a.syncAdapterRow(ctx, "KFB", "EXCHANGE", "Кыргызская фондовая биржа", snap.Health, 20)
@@ -100,6 +115,12 @@ func (a *App) marketItemFromKFB(ctx context.Context, row map[string]any) (market
 		VenueSymbol:  fields.Symbol,
 	}
 	a.attachSnapshot(ctx, instrID, &item)
+	if quote := a.liveKFBQuote(ctx, fields.Symbol, fields.Board); quote != nil {
+		item.Last, _ = quote["last"].(string)
+		item.Bid, _ = quote["bid"].(string)
+		item.Ask, _ = quote["offer"].(string)
+		item.Volume, _ = quote["volume"].(string)
+	}
 	return item, nil
 }
 

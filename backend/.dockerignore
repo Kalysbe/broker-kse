@@ -1,0 +1,4 @@
+certs/
+data/
+*.log
+*.exe

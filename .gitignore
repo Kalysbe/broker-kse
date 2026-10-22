@@ -1,8 +1,12 @@
 .env
+.env.production.local
+.deploy/
+backend/certs/
 data/
 frontend/node_modules/
 frontend/dist/
 backend/data/
+loadtest/reports/
 *.exe
 *.log
 .idea/

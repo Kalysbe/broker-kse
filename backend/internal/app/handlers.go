@@ -1108,26 +1108,18 @@ func (a *App) handleMoneyMove(w http.ResponseWriter, r *http.Request, kind strin
 	if kind == "WITHDRAWAL" {
 		table = "withdrawals"
 	}
-	q := `INSERT INTO ` + table + ` (id, account_id, amount, currency, status, idempotency_key, created_by) VALUES ($1,$2,$3,$4,'COMPLETED',$5,$6)`
+	q := `INSERT INTO ` + table + ` (id, account_id, amount, currency, status, idempotency_key, created_by) VALUES ($1,$2,$3,$4,'REQUESTED',$5,$6)`
 	if kind == "WITHDRAWAL" {
-		q = `INSERT INTO withdrawals (id, account_id, amount, currency, status, destination, idempotency_key, created_by) VALUES ($1,$2,$3,$4,'COMPLETED','{}',$5,$6)`
+		q = `INSERT INTO withdrawals (id, account_id, amount, currency, status, destination, idempotency_key, created_by) VALUES ($1,$2,$3,$4,'REQUESTED','{}',$5,$6)`
 	}
 	if _, err := tx.Exec(r.Context(), q, idv, acct, amt, cur, idem, p.UserID); err != nil {
 		httpx.WriteError(w, r, httpx.ErrConflict)
 		return
 	}
-	if kind == "DEPOSIT" {
-		if err := a.postLedger(r.Context(), tx, acct, cur, kind, idv, "Client deposit", idem, []ledgerLine{
-			moneyLine("AVAILABLE", "DEPOSIT", decimal.Zero, amt),
-			moneyLine("SETTLED", "DEPOSIT", amt, decimal.Zero),
-		}, &p.UserID); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-	} else {
-		if err := a.postLedger(r.Context(), tx, acct, cur, kind, idv, "Client withdrawal", idem, []ledgerLine{
+	if kind == "WITHDRAWAL" {
+		if err := a.postLedger(r.Context(), tx, acct, cur, kind, idv, "Reserve client withdrawal", "withdrawal-reserve-"+idv.String(), []ledgerLine{
 			moneyLine("AVAILABLE", "WITHDRAWAL", amt, decimal.Zero),
-			moneyLine("SETTLED", "WITHDRAWAL", decimal.Zero, amt),
+			moneyLine("PENDING", "WITHDRAWAL", decimal.Zero, amt),
 		}, &p.UserID); err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -1137,19 +1129,36 @@ func (a *App) handleMoneyMove(w http.ResponseWriter, r *http.Request, kind strin
 		httpx.WriteError(w, r, err)
 		return
 	}
-	a.Audit.Write(r.Context(), kind+"_COMPLETED", strings.ToLower(kind), &idv, nil, req)
-	httpx.WriteJSON(w, 201, map[string]any{"id": idv, "status": "COMPLETED", "amount": amt.String()})
+	a.Audit.Write(r.Context(), kind+"_REQUESTED", strings.ToLower(kind), &idv, nil, req)
+	httpx.WriteJSON(w, 201, map[string]any{"id": idv, "status": "REQUESTED", "amount": amt.String()})
+}
+
+func (a *App) handleApproveDeposit(w http.ResponseWriter, r *http.Request) {
+	a.approveMoneyMove(w, r, "DEPOSIT")
 }
 
 func (a *App) handleApproveWithdrawal(w http.ResponseWriter, r *http.Request) {
+	a.approveMoneyMove(w, r, "WITHDRAWAL")
+}
+
+func (a *App) approveMoneyMove(w http.ResponseWriter, r *http.Request, kind string) {
 	idv, err := chiID(r, "id")
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	p, _ := httpx.PrincipalFrom(r.Context())
+	table := "deposits"
+	if kind == "WITHDRAWAL" { table = "withdrawals" }
+	tx, err := a.DB.Begin(r.Context())
+	if err != nil { httpx.WriteError(w, r, err); return }
+	defer tx.Rollback(r.Context())
 	var creator uuid.UUID
-	if err := a.DB.QueryRow(r.Context(), `SELECT created_by FROM withdrawals WHERE id=$1`, idv).Scan(&creator); err != nil {
+	var accountID uuid.UUID
+	var amount decimal.Decimal
+	var currency, status string
+	query := `SELECT created_by, account_id, amount, currency, status FROM ` + table + ` WHERE id=$1 FOR UPDATE`
+	if err := tx.QueryRow(r.Context(), query, idv).Scan(&creator, &accountID, &amount, &currency, &status); err != nil {
 		httpx.WriteError(w, r, httpx.ErrNotFound)
 		return
 	}
@@ -1157,7 +1166,23 @@ func (a *App) handleApproveWithdrawal(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, httpx.ErrSelfApproval)
 		return
 	}
-	httpx.WriteJSON(w, 200, map[string]any{"id": idv, "status": "APPROVED"})
+	if status == "COMPLETED" { httpx.WriteJSON(w, 200, map[string]any{"id": idv, "status": status}); return }
+	if status != "REQUESTED" { httpx.WriteError(w, r, httpx.ErrConflict); return }
+	var lines []ledgerLine
+	if kind == "DEPOSIT" {
+		lines = []ledgerLine{moneyLine("AVAILABLE", "DEPOSIT", decimal.Zero, amount), moneyLine("SETTLED", "DEPOSIT", amount, decimal.Zero)}
+	} else {
+		lines = []ledgerLine{moneyLine("PENDING", "WITHDRAWAL", amount, decimal.Zero), moneyLine("SETTLED", "WITHDRAWAL", decimal.Zero, amount)}
+	}
+	if err := a.postLedger(r.Context(), tx, accountID, currency, kind, idv, "Approve client "+strings.ToLower(kind), strings.ToLower(kind)+"-complete-"+idv.String(), lines, &p.UserID); err != nil {
+		httpx.WriteError(w, r, err); return
+	}
+	if _, err := tx.Exec(r.Context(), `UPDATE `+table+` SET status='COMPLETED', updated_at=now() WHERE id=$1`, idv); err != nil {
+		httpx.WriteError(w, r, err); return
+	}
+	if err := tx.Commit(r.Context()); err != nil { httpx.WriteError(w, r, err); return }
+	a.Audit.Write(r.Context(), kind+"_COMPLETED", strings.ToLower(kind), &idv, nil, nil)
+	httpx.WriteJSON(w, 200, map[string]any{"id": idv, "status": "COMPLETED"})
 }
 
 func (a *App) handlePortfolio(w http.ResponseWriter, r *http.Request) {
@@ -1204,6 +1229,33 @@ func (a *App) handlePortfolio(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleListTrades(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpx.PrincipalFrom(r.Context())
+	if a.KFB != nil && a.KFB.Configured() {
+		if remote, remoteErr := a.KFB.FetchTrades(r.Context()); remoteErr == nil {
+			items := make([]map[string]any, 0, len(remote))
+			clientCode := ""
+			if p.ClientID != nil {
+				var err error
+				clientCode, err = a.clientCodeForUser(r.Context(), *p.ClientID)
+				if err != nil { httpx.WriteError(w, r, err); return }
+			}
+			for _, trade := range remote {
+				if p.ClientID != nil && !strings.EqualFold(strings.TrimSpace(mapString(trade, "client_code")), strings.TrimSpace(clientCode)) { continue }
+				qty, price := mapString(trade, "last_qty"), mapString(trade, "last_px")
+				gross := ""
+				if qv, qe := decimal.NewFromString(qty); qe == nil { if pv, pe := decimal.NewFromString(price); pe == nil { gross = qv.Mul(pv).String() } }
+				item := map[string]any{
+					"id": mapString(trade, "id"), "exec_id": mapString(trade, "exec_id"), "order_id": mapString(trade, "order_id"),
+					"client_order_id": mapString(trade, "client_order_id"), "client_code": mapString(trade, "client_code"),
+					"symbol": mapString(trade, "symbol"), "board": mapString(trade, "board"), "side": mapString(trade, "side"),
+					"quantity": qty, "price": price, "gross_amount": gross, "commission": "—",
+					"quik_order_id": mapString(trade, "quik_order_id"), "created_at": mapString(trade, "created_at"), "source": "KFB",
+				}
+				items = append(items, item)
+			}
+			httpx.WriteJSON(w, 200, map[string]any{"items": items, "source": "KFB", "live": true})
+			return
+		}
+	}
 	var scope any
 	if p.ClientID != nil {
 		scope = *p.ClientID
@@ -1230,7 +1282,7 @@ func (a *App) handleListTrades(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, map[string]any{"id": idv, "order_id": oid, "account_id": aid, "instrument_id": iid, "side": side, "quantity": qty.String(), "price": px.String(), "gross_amount": gross.String(), "commission": comm.String(), "net_amount": net.String(), "trade_date": td.Format("2006-01-02"), "settlement_date": sd.Format("2006-01-02")})
 	}
-	httpx.WriteJSON(w, 200, map[string]any{"items": items})
+	httpx.WriteJSON(w, 200, map[string]any{"items": items, "source": "LOCAL", "live": false})
 }
 
 func (a *App) handleListSettlements(w http.ResponseWriter, r *http.Request) {
@@ -1514,8 +1566,11 @@ func (a *App) handleListWithdrawals(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) listMoney(w http.ResponseWriter, r *http.Request, table string) {
-	q := `SELECT id, account_id, amount, currency, status, created_at FROM ` + table + ` ORDER BY created_at DESC LIMIT 200`
-	rows, err := a.DB.Query(r.Context(), q)
+	p, _ := httpx.PrincipalFrom(r.Context())
+	var scope any
+	if p.ClientID != nil { scope = *p.ClientID }
+	q := `SELECT m.id, m.account_id, m.amount, m.currency, m.status, m.created_at FROM ` + table + ` m JOIN trading_accounts a ON a.id=m.account_id WHERE ($1::uuid IS NULL OR a.client_id=$1) ORDER BY m.created_at DESC LIMIT 200`
+	rows, err := a.DB.Query(r.Context(), q, scope)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -1574,10 +1629,6 @@ func (a *App) handleTariffs(w http.ResponseWriter, r *http.Request) {
 		items = append(items, map[string]any{"id": idv, "code": code, "name": name, "commission_type": ct, "percentage": pct.String(), "minimum_fee": min.String(), "status": st})
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"items": items})
-}
-
-func (a *App) handleWS(w http.ResponseWriter, r *http.Request) {
-	httpx.WriteJSON(w, 200, map[string]string{"protocol": "websocket", "hint": "Upgrade required; use /v1/ws from a WS client after Bearer auth"})
 }
 
 func requirePassword(p string) error {

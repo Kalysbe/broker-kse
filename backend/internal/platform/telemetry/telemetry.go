@@ -1,7 +1,9 @@
 package telemetry
 
 import (
+	"bufio"
 	"context"
+	"net"
 	"net/http"
 	"time"
 
@@ -15,8 +17,8 @@ var (
 		Help: "HTTP requests",
 	}, []string{"method", "code"})
 	HTTPLatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "sbis_http_request_duration_seconds",
-		Help: "HTTP latency",
+		Name:    "sbis_http_request_duration_seconds",
+		Help:    "HTTP latency",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"method"})
 	OrdersTotal = promauto.NewCounter(prometheus.CounterOpts{
@@ -48,6 +50,8 @@ type writer struct {
 	code int
 }
 
+func (w *writer) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *writer) WriteHeader(code int) {
 	w.code = code
 	w.ResponseWriter.WriteHeader(code)
@@ -60,3 +64,7 @@ func Shutdown(ctx context.Context) error {
 
 // OTLP tracing is enabled when OTEL_EXPORTER_OTLP_ENDPOINT is set at the collector.
 // Metrics are always exposed on /metrics for Prometheus.
+
+func (w *writer) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return http.NewResponseController(w.ResponseWriter).Hijack()
+}

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>КФБ Инвест — проверка устройства</title></head><body><div id="root"></div><script type="module">
+// Local QA fixture, excluded from Vite's production entry points. No production
+// route or query parameter changes device detection. Only this fixture supplies
+// a synthetic navigator for the Android/iPhone UI checks.
+const params = new URL(location.href).searchParams;
+const platform = params.get('device') || 'android';
+const userAgent = platform === 'ios'
+  ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1'
+  : 'Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36';
+Object.defineProperty(navigator, 'userAgent', {value: userAgent, configurable: true});
+if (params.has('fresh')) sessionStorage.removeItem('kfb-mobile-app-dismissed');
+if (params.has('unavailable')) {
+  const {default: release} = await import('/src/mobile-release.json');
+  release.available = false;
+  release.url = '';
+}
+const route = params.get('route');
+history.replaceState(null, '', route === 'download' ? '/download' : route === 'trading' ? '/trading' : '/login');
+await import('/src/main.tsx');
+</script></body></html>

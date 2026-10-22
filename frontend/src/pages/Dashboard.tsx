@@ -14,15 +14,8 @@ type Dash = {
   active_adapters: number;
 };
 
-const tones = [
-  "from-brand/20 to-brand/5 text-brand-dark",
-  "from-navy/15 to-navy/5 text-navy",
-  "from-emerald-500/15 to-emerald-500/5 text-emerald-700",
-  "from-sky-500/15 to-sky-500/5 text-sky-800",
-  "from-amber-400/20 to-amber-400/5 text-amber-800",
-  "from-violet-500/15 to-violet-500/5 text-violet-800",
-  "from-rose-500/15 to-rose-500/5 text-rose-700",
-];
+const tones = ["bg-blue-50 text-blue-600", "bg-indigo-50 text-indigo-600", "bg-emerald-50 text-emerald-600", "bg-cyan-50 text-cyan-600", "bg-amber-50 text-amber-600", "bg-violet-50 text-violet-600", "bg-rose-50 text-rose-600"];
+const glyphs = ["↗", "⇄", "₸", "◉", "▣", "⌁", "!"];
 
 export function DashboardPage() {
   const { t, i18n } = useTranslation();
@@ -52,35 +45,36 @@ export function DashboardPage() {
 
   return (
     <div>
-      <div className="rounded-2xl bg-mesh text-white p-6 mb-6 overflow-hidden relative">
-        <div className="login-grid absolute inset-0 opacity-40" />
-        <div className="relative">
-          <div className="text-sm text-white/60 capitalize">{today}</div>
-          <h1 className="text-2xl font-semibold mt-1">
+      <div className="mb-6 overflow-hidden rounded-3xl border border-blue-100 bg-white p-6 shadow-[0_18px_50px_rgba(37,99,235,.08)] relative">
+        <div className="absolute -right-16 -top-28 h-64 w-64 rounded-full bg-blue-100/70 blur-2xl" />
+        <div className="relative flex items-center justify-between gap-6">
+          <div><div className="text-sm font-medium text-blue-600 capitalize">{today}</div>
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-950 mt-1">
             {t("dash.welcome", { name: user?.first_name || t("app.short") })}
           </h1>
-          <p className="text-sm text-white/65 mt-2 max-w-xl">{t("dash.welcomeHint")}</p>
+          <p className="text-sm text-slate-500 mt-2 max-w-xl">{t("dash.welcomeHint")}</p></div>
+          <div className="hidden h-20 w-20 place-items-center rounded-3xl bg-blue-600 text-3xl text-white shadow-[0_16px_30px_rgba(37,99,235,.25)] sm:grid">S</div>
         </div>
       </div>
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         {cards.map(([l, v], i) => (
-          <div key={l} className="surface p-4">
-            <div className={`h-8 w-8 rounded-xl bg-gradient-to-br ${tones[i % tones.length]} mb-3`} />
-            <div className="text-xs text-muted">{l}</div>
-            <div className="text-2xl font-semibold mt-1 tabular-nums">{v}</div>
+          <div key={l} className="surface group p-5 transition-all hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(15,23,42,.09)]">
+            <div className="flex items-start justify-between"><div className={`grid h-10 w-10 place-items-center rounded-xl text-lg font-semibold ${tones[i % tones.length]}`}>{glyphs[i]}</div><span className="text-xs font-medium text-emerald-600">Live</span></div>
+            <div className="mt-4 text-xs font-medium uppercase tracking-wide text-slate-400">{l}</div>
+            <div className="text-2xl font-semibold text-slate-900 mt-1 tabular-nums">{v}</div>
           </div>
         ))}
       </div>
-      <div className="surface p-5 h-80">
-        <div className="text-sm font-medium mb-3">{t("dash.ordersToday")} / {t("dash.tradesToday")}</div>
+      <div className="surface p-6 h-96">
+        <div className="mb-5 flex items-center justify-between"><div><div className="text-base font-semibold text-slate-900">Активность торгов</div><div className="mt-1 text-sm text-slate-400">{t("dash.ordersToday")} / {t("dash.tradesToday")}</div></div><span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">● Данные обновляются</span></div>
         <ResponsiveContainer width="100%" height="90%">
           <BarChart data={chart}>
-            <CartesianGrid stroke="#D7E2E4" vertical={false} />
+            <CartesianGrid stroke="#E8EDF5" vertical={false} />
             <XAxis dataKey="name" />
             <YAxis />
             <Tooltip />
-            <Bar dataKey="orders" fill="#3AA8B5" radius={[6, 6, 0, 0]} />
-            <Bar dataKey="trades" fill="#0B2429" radius={[6, 6, 0, 0]} />
+            <Bar dataKey="orders" fill="#2563EB" radius={[7, 7, 0, 0]} />
+            <Bar dataKey="trades" fill="#8B5CF6" radius={[7, 7, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

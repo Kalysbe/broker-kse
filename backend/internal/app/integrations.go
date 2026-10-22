@@ -50,8 +50,11 @@ func (a *App) kfbHealth(ctx context.Context) map[string]any {
 		snap = a.KFB.Snapshot()
 	}
 	out := map[string]any{
-		"connected": snap.Connected,
-		"health":    snap.Health,
+		"connected":          snap.Connected,
+		"health":             snap.Health,
+		"environment":        connectionEnvironment(a.KFB.ConnectionSettings()),
+		"read_only":          a.Cfg.ExchangeReadOnly,
+		"realtime_connected": a.KFBStreamConnected.Load(),
 	}
 	if snap.Health == "" {
 		out["health"] = "OFFLINE"
@@ -73,7 +76,7 @@ func (a *App) handleListPositions(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	pos, err := a.KFB.FetchPositions(r.Context())
+	pos, err := a.kfbPositions(r.Context())
 	if err != nil {
 		httpx.WriteJSON(w, 200, map[string]any{"items": empty, "error": err.Error()})
 		return

@@ -2,13 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
-  font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  font-family: Inter, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  background: #f6f8fc;
+  color: #172033;
 }
 
 @layer components {
   .surface {
-    @apply bg-white border border-line rounded-2xl shadow-card;
+    @apply bg-white border border-slate-200 rounded-2xl shadow-[0_8px_30px_rgba(15,23,42,0.05)];
   }
 
   .btn-primary {
@@ -22,9 +32,40 @@ body {
   }
 
   .page-title {
-    @apply text-2xl font-semibold tracking-tight text-ink;
+    @apply text-3xl font-semibold tracking-tight text-slate-950;
   }
+
+  .page-heading { @apply mb-6 flex flex-wrap items-end justify-between gap-4; }
+  .page-subtitle { @apply mt-1 text-sm text-slate-500; }
+  .eyebrow { @apply mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-600; }
+  .data-grid { @apply overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.06)]; }
+  .grid-search { @apply w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100; }
+  .grid-tool { @apply inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700; }
+  .grid-page { @apply grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:border-blue-300 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-35; }
 }
+
+input[type="checkbox"] { accent-color: #2563eb; width: 15px; height: 15px; }
+
+.sidebar-scroll,
+.app-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+  overscroll-behavior: contain;
+}
+
+.sidebar-scroll {
+  overscroll-behavior-y: none;
+  touch-action: pan-y;
+}
+
+.sidebar-scroll::-webkit-scrollbar,
+.app-scroll::-webkit-scrollbar { width: 7px; }
+.sidebar-scroll::-webkit-scrollbar-track,
+.app-scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar-scroll::-webkit-scrollbar-thumb,
+.app-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+.sidebar-scroll::-webkit-scrollbar-thumb:hover,
+.app-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 main h1 {
   letter-spacing: -0.02em;

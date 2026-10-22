@@ -16,11 +16,20 @@ func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(httpx.RequestID)
 	r.Use(httpx.SecurityHeaders)
+	r.Use(a.exchangeReadOnly)
 	r.Use(httpx.Recoverer(a.Log))
 	r.Use(httpx.AccessLog(a.Log))
 	r.Use(telemetry.Middleware)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/realtime/orders" || r.URL.Path == "/v1/realtime/ws" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			middleware.Timeout(60*time.Second)(next).ServeHTTP(w, r)
+		})
+	})
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   a.Cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -51,6 +60,7 @@ func (a *App) Router() http.Handler {
 	})
 
 	r.Route("/v1", func(r chi.Router) {
+		r.Get("/realtime/ws", a.handleWebSocket)
 		r.Post("/auth/login", a.handleLogin)
 		r.Post("/auth/refresh", a.handleRefresh)
 		r.Post("/auth/password-reset", a.handlePasswordResetRequest)
@@ -58,12 +68,13 @@ func (a *App) Router() http.Handler {
 
 		r.Group(func(r chi.Router) {
 			r.Use(a.Authenticate)
+			r.Get("/realtime/rate-limits", a.handleRealtimeLimits)
+			r.Put("/realtime/rate-limits", a.handleRealtimeLimits)
+			r.With(a.perm("orders.read")).Get("/realtime/orders", a.handleOrderStream)
 			r.Post("/auth/logout", a.handleLogout)
 			r.Get("/auth/me", a.handleMe)
 			r.Post("/auth/change-password", a.handleChangePassword)
 			r.Get("/dashboard", a.handleDashboard)
-			r.Get("/ws", a.handleWS)
-
 			r.With(a.perm("users.read")).Get("/users", a.handleListUsers)
 			r.With(a.perm("users.read")).Get("/users/{id}", a.handleGetUser)
 			r.With(a.perm("users.write")).Post("/users", a.handleCreateUser)
@@ -88,6 +99,7 @@ func (a *App) Router() http.Handler {
 			r.With(a.perm("cash.read")).Get("/accounts/{id}/cash", a.handleCash)
 			r.With(a.perm("cash.read")).Get("/accounts/{id}/ledger", a.handleLedger)
 			r.With(a.perm("portfolio.read")).Get("/accounts/{id}/portfolio", a.handlePortfolio)
+			r.With(a.perm("portfolio.read")).Get("/accounts/{id}/exchange-portfolio", a.handleExchangePortfolio)
 			r.With(a.perm("portfolio.read")).Get("/positions", a.handleListPositions)
 
 			r.With(a.perm("instruments.read")).Get("/instruments", a.handleListInstruments)
@@ -107,13 +119,17 @@ func (a *App) Router() http.Handler {
 			r.With(a.perm("settlement.post")).Post("/settlements/{id}/post", a.handlePostSettlement)
 
 			r.With(a.perm("payments.create")).Post("/deposits", a.handleDeposit)
+			r.With(a.perm("payments.create")).Post("/deposits/card/mock", a.handleMockCardDeposit)
 			r.With(a.perm("payments.create")).Post("/withdrawals", a.handleWithdrawal)
 			r.With(a.perm("cash.read")).Get("/deposits", a.handleListDeposits)
 			r.With(a.perm("cash.read")).Get("/withdrawals", a.handleListWithdrawals)
 			r.With(a.perm("payments.approve")).Post("/withdrawals/{id}/approve", a.handleApproveWithdrawal)
+			r.With(a.perm("payments.approve")).Post("/deposits/{id}/approve", a.handleApproveDeposit)
 
 			r.With(a.perm("tariffs.read")).Get("/tariffs", a.handleTariffs)
 			r.With(a.perm("adapters.read")).Get("/adapters", a.handleAdapters)
+			r.Get("/integrations/kfb/settings", a.handleKFBSettings)
+			r.Put("/integrations/kfb/settings", a.handleKFBSettings)
 			r.Get("/integrations/kfb/health", a.handleKFBHealth)
 			r.With(a.perm("adapters.read")).Get("/integrations/kfb", a.handleKFBStatus)
 			r.With(a.perm("adapters.operate")).Post("/integrations/kfb/connect", a.handleKFBStatus)
@@ -126,6 +142,12 @@ func (a *App) Router() http.Handler {
 			r.With(a.perm("audit.read")).Get("/audit", a.handleAudit)
 			r.With(a.perm("notifications.manage")).Get("/notifications", a.handleNotifications)
 			r.Get("/notifications", a.handleNotifications)
+			r.With(a.perm("adapters.operate")).Post("/load-tests", a.handleStartLoadTest)
+			r.With(a.perm("adapters.operate")).Get("/load-tests/current", a.handleCurrentLoadTest)
+			r.With(a.perm("adapters.operate")).Get("/load-tests/current/requests", a.handleLoadTestRequests)
+			r.With(a.perm("adapters.operate")).Get("/load-tests/active", a.handleActiveLoadOrders)
+			r.With(a.perm("adapters.operate")).Get("/load-tests/orders/{id}", a.handleLoadOrderTracking)
+			r.With(a.perm("adapters.operate")).Post("/load-tests/current/cancel", a.handleCancelLoadTest)
 			r.With(a.perm("reconciliation.run")).Post("/reconciliation/jobs", a.handleReconciliationRun)
 			r.With(a.perm("instruments.read")).Get("/corporate-actions", a.handleCorporateActions)
 		})

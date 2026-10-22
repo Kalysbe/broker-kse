@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package sbis.realtime.v1;
+
+option go_package = "statebroker/sbis/internal/gen/realtime/v1;realtimev1";
+
+service RealtimeService {
+  rpc Connect(stream ClientMessage) returns (stream ServerMessage);
+}
+
+enum Topic {
+  TOPIC_UNSPECIFIED = 0;
+  TOPIC_ORDERS = 1;
+  TOPIC_EXECUTIONS = 2;
+  TOPIC_TRADES = 3;
+  TOPIC_MARKET_DATA = 4;
+  TOPIC_POSITIONS = 5;
+  TOPIC_NOTIFICATIONS = 6;
+  TOPIC_ADAPTERS = 7;
+  TOPIC_ALERTS = 8;
+}
+
+message ClientMessage {
+  string request_id = 1;
+  oneof command {
+    Subscribe subscribe = 2;
+    Unsubscribe unsubscribe = 3;
+    Ping ping = 4;
+  }
+}
+
+message Subscribe {
+  repeated Topic topics = 1;
+  repeated string instrument_ids = 2;
+}
+
+message Unsubscribe {
+  repeated Topic topics = 1;
+}
+
+message Ping { string nonce = 1; }
+
+message ServerMessage {
+  string request_id = 1;
+  int64 sent_at_unix_ms = 2;
+  oneof message {
+    SubscriptionAck subscription = 3;
+    Event event = 4;
+    Pong pong = 5;
+    StreamError error = 6;
+  }
+}
+
+message SubscriptionAck { repeated Topic topics = 1; }
+
+message Event {
+  string id = 1;
+  Topic topic = 2;
+  string type = 3;
+  string aggregate_id = 4;
+  bytes payload_json = 5;
+  int64 created_at_unix_ms = 6;
+}
+
+message Pong { string nonce = 1; }
+
+message StreamError {
+  string code = 1;
+  string message = 2;
+}

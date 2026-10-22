@@ -43,10 +43,14 @@ services:
     build:
       context: ./backend
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       HTTP_ADDR: ":8080"
+      GRPC_ADDR: ":9090"
       DATABASE_URL: postgres://sbis:sbis@postgres:5432/sbis?sslmode=disable
       REDIS_URL: redis://redis:6379/0
+      KFB_GATEWAY_URL: ${KFB_GATEWAY_URL:-http://host.docker.internal:8080}
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,17 +60,23 @@ services:
         condition: service_completed_successfully
     ports:
       - "18080:8080"
+      - "19090:9090"
     volumes:
       - objects:/data/objects
+      - ./backend/certs:/certs:ro
+      - ./loadtest/reports:/reports
     command: ["/app/api"]
 
   worker:
     build:
       context: ./backend
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       DATABASE_URL: postgres://sbis:sbis@postgres:5432/sbis?sslmode=disable
       REDIS_URL: redis://redis:6379/0
+      KFB_GATEWAY_URL: ${KFB_GATEWAY_URL:-http://host.docker.internal:8080}
     depends_on:
       postgres:
         condition: service_healthy
@@ -95,6 +105,31 @@ services:
       - api
     ports:
       - "15173:80"
+
+  order-load:
+    build:
+      context: ./backend
+    env_file: .env
+    environment:
+      LOAD_BASE_URL: ${LOAD_BASE_URL:-http://api:8080}
+      LOAD_TOKEN: ${LOAD_TOKEN:-}
+      LOAD_RATE: ${LOAD_RATE:-100}
+      LOAD_DURATION: ${LOAD_DURATION:-10s}
+      LOAD_WORKERS: ${LOAD_WORKERS:-100}
+      LOAD_ACCOUNT: ${LOAD_ACCOUNT:-1-3101-006}
+      LOAD_CLIENT: ${LOAD_CLIENT:-006}
+      LOAD_SYMBOL: ${LOAD_SYMBOL:-KG0105166315}
+      LOAD_BOARD: ${LOAD_BOARD:-LISTEDSTOCKK}
+      LOAD_PRICE: ${LOAD_PRICE:-400}
+      LOAD_EXECUTE: ${LOAD_EXECUTE:-false}
+      LOAD_OUT: /reports
+    depends_on:
+      api:
+        condition: service_started
+    volumes:
+      - ./loadtest/reports:/reports
+    command: ["/app/orderload"]
+    profiles: ["loadtest"]
 
   nginx:
     image: nginx:1.27-alpine
