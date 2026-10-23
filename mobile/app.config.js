@@ -3,7 +3,7 @@ export default ({ config }) => ({
   updates: {
     ...config.updates,
     url: process.env.EXPO_PUBLIC_API_URL
-      ? `${new URL(process.env.EXPO_PUBLIC_API_URL).origin}/api/v1/mobile/updates`
+      ? `${new URL(process.env.EXPO_PUBLIC_API_URL).origin}/v1/mobile/updates`
       : config.updates.url,
   },
 });

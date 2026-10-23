@@ -6,7 +6,7 @@
     "version": "0.1.2",
     "runtimeVersion": "sbis-android-ota-1",
     "updates": {
-      "url": "http://172.23.10.97/api/v1/mobile/updates",
+      "url": "http://172.23.10.97:5174/v1/mobile/updates",
       "checkAutomatically": "ON_ERROR_RECOVERY",
       "fallbackToCacheTimeout": 0,
       "codeSigningCertificate": "./certs/certificate.pem",

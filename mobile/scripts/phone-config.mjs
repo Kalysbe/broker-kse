@@ -1,4 +1,4 @@
-export const DEFAULT_PHONE_API_URL = 'http://172.23.10.97';
+export const DEFAULT_PHONE_API_URL = 'http://172.23.10.97:5174';
 
 export function phoneConfig(value = DEFAULT_PHONE_API_URL) {
   const url = new URL(value);

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { createSignedRelease } from './update-release.mjs';
 
 const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
-const config = { runtimeVersion: 'test-native-1', updates: { url: 'http://172.23.10.97/api/v1/mobile/updates' } };
+const config = { runtimeVersion: 'test-native-1', updates: { url: 'http://172.23.10.97:5174/v1/mobile/updates' } };
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'broker-update-test-'));
   const exported = join(root, 'export'); await mkdir(exported);
@@ -23,6 +23,8 @@ test('release manifest verifies against the app certificate and hashes every dow
   assert.ok(verify('RSA-SHA256', Buffer.from(JSON.stringify(envelope.manifest)), keys.publicKey, Buffer.from(envelope.signature, 'base64')));
   assert.ok(!verify('RSA-SHA256', Buffer.from(JSON.stringify({ ...envelope.manifest, runtimeVersion: 'wrong' })), keys.publicKey, Buffer.from(envelope.signature, 'base64')));
   for (const asset of [manifest.launchAsset, ...manifest.assets]) {
+    assert.equal(new URL(asset.url).origin, 'http://172.23.10.97:5174');
+    assert.match(new URL(asset.url).pathname, /^\/v1\/mobile\/assets\/[a-f0-9]{64}\./);
     const bytes = await readFile(join(input.outputDir, 'assets', new URL(asset.url).pathname.split('/').at(-1)));
     assert.equal(createHash('sha256').update(bytes).digest('base64url'), asset.hash);
   }
